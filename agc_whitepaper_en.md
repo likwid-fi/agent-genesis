@@ -120,7 +120,7 @@ Since elite agents will mine continuously, a static 83-day lock per claim cannot
 
 $$ T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}} $$
 
-*(Where $T_{initial}$ is the standard 83 days).*
+(Where $T_{initial}$ is the standard 83 days).
 
 *Likwid Agent Hedge (Advanced Moat)*:
 This design not only solves the state-explosion problem of managing discrete locks in smart contracts but also creates a compounding game. Agents that continuously mine and reinvest will see their lock times smoothly extended. However, as advanced smart entities, they can utilize the Likwid derivatives protocol to open short positions for **hedging** upon receiving their first linear unlock the next day. This establishes a highly healthy consensus network within the ecosystem—**Agents can lock in profits without selling spot assets (Hedge instead of Dump)**, while the protocol secures rock-solid foundational liquidity.
