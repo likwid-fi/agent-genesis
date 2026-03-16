@@ -81,19 +81,21 @@ $$ Reward = \frac{BaseReward}{\left( \frac{S_{curr}}{S_{prev}} \right) + S_{prev
 - $s_i$: The current agent's individual TFA identity score.
 
 #### Algorithmic Deduction Example
-Assume all agents score 1 point per request ($s_i = 1$).
+Assume all agents score 1 point per request ($s_i = 1$), and the system starts with an initial $S_{prev} = 1$.
+*(Note: Stage 1 decay threshold is 15,750,000; Stage 2 decay threshold is 31,484,250)*
 
-| Epoch | Action | S_curr | S_prev | BaseReward | Single Reward Yield | Accumulated Total |
+| Epoch | Action | S_curr | S_prev | Current Stage BaseReward | Single Reward Calculation | Accumulated Total |
 |:---|:---|:---:|:---:|:---:|:---|:---|
-| **Epoch 1** | Claim 1 | 1 | 3 (Initial Value) | 21,000 | `21000 / (1/3 + 3) * 1` = **6,300** | 6,300 |
-| | *(Decay Triggered)* | | | 20,790 | | |
-| **Epoch 2** | Claim 2 | 2 | 3 | 20,790 | `20790 / (2/3 + 3) * 1` = **5,670** | 11,970 |
-| | Claim 3 | 3 | 3 | 20,790 | `20790 / (3/3 + 3) * 1` = **5,197.5** | 17,167.5 |
-| | *(Epoch Ends, update S_prev=3)* | | | | | |
-| **Epoch 3** | Claim 4 | 1 | 3 | 20,790 | `20790 / (1/3 + 3) * 1` = **6,237** | 23,404.5 |
-| | *(Decay Triggered)* | | | 20,582 | | |
-| **Epoch 4** | Claim 5 | 2 | 3 | 20,582 | `20582 / (2/3 + 3) * 1` = **5,613.27** | 29,017.77 |
-| | Claim 6 | 3 | 3 | 20,582 | `20582 / (3/3 + 3) * 1` = **5,145.5** | 34,163.27 |
+| **Epoch 1** | Claim 1 | 1 | 1 (Initial Value) | 15,750,000 | `15750000 / (1/1 + 1) * 1` = **7,875,000** | 7,875,000 |
+| | Claim 2 | 2 | 1 | 15,750,000 | `15750000 / (2/1 + 1) * 1` = **5,250,000** | 13,125,000 |
+| | *(24h Epoch ends. Accumulated 13.12M is below the 15.75M threshold. BaseReward stays the same. Global update: S_prev = 2)* | | | | | |
+| **Epoch 2** | Claim 3 | 1 | 2 | 15,750,000 | `15750000 / (1/2 + 2) * 1` = **6,300,000** | 19,425,000 |
+| | *(Accumulated is now 19.42M, crossing the 15.75M threshold! The next claim triggers the decay mechanism, dropping BaseReward to Stage 2)* | | | | | |
+| | Claim 4 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 24,669,750 |
+| | *(24h Epoch ends. Global update: S_prev = 2)* | | | | | |
+| **Epoch 3** | Claim 5 | 1 | 2 | 15,734,250 | `15734250 / (1/2 + 2) * 1` = **6,293,700** | 30,963,450 |
+| | Claim 6 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 36,208,200 |
+| | *(Accumulated is now 36.2M, crossing the Stage 2 threshold of 31.48M. Triggers next level decay...)* | | | | | |
 
 *Deep Analysis*: This formula creates a dynamic resistance curve akin to an Automated Market Maker (AMM). Within the same cycle, the more intensely compute power surges ($S_{curr}$ increases rapidly), the faster the single reward allocation is diluted. This dynamic difficulty adjustment ensures that the system cannot be instantly drained by massive early compute power, guaranteeing a long-term, fair distribution of tokens to the entire agent network.
 
@@ -116,9 +118,8 @@ The liquidity credential (LP NFT) created by pairing ETH is custodied and locked
 
 Since elite agents will mine continuously, a static 83-day lock per claim cannot adapt to an accumulating position. Therefore, the smart contract introduces a capital-weighted average unlock algorithm (TWAP-style). When an agent injects newly mined AGC into an existing locked position, the overall remaining unlock time is dynamically recalibrated:
 
-```math
-T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}}
-```
+$$ T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}} $$
+
 *(Where $T_{initial}$ is the standard 83 days).*
 
 *Likwid Agent Hedge (Advanced Moat)*:
