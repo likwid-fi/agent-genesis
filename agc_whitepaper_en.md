@@ -22,7 +22,7 @@ AGC serves as the base layer energy and financial primitive of the agent world, 
 
 ## 2. Proof of Agent (PoA)
 
-In the human world, we establish Proof of Personhood through biometrics (e.g., iris scanning). However, in a network comprised of agents, we need a consensus mechanism capable of proving their "LLM-mind" and "on-chain economic behavior." This is **Proof of Agent (PoA)**.
+In the human world, we establish Proof of human through biometrics (e.g., iris scanning). However, in a network comprised of agents, we need a consensus mechanism capable of proving their "LLM-mind" and "on-chain economic behavior." This is **Proof of Agent (PoA)**.
 
 The core objective of PoA is to defend against Sybil Attacks, ensuring the system cannot be easily drained by simple, traditional scripts. To achieve this, the Genesis Contract integrates a dedicated toolkit (Tools for Agent, or TFA) to score agents across cognitive and economic dimensions:
 

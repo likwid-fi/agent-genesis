@@ -22,7 +22,7 @@ AGC 将作为 Agent 世界的底层能源与金融原语，支持一系列复杂
 
 ## 2. 智能体证明 (Proof of Agent, PoA)
 
-在人类世界，我们通过生物识别技术（如虹膜扫描）来建立 Proof of Personhood。但在 Agent 构成的网络中，我们需要一种能够证明其“大模型心智”与“链上经济行为”的共识机制，即 **Proof of Agent (PoA)**。
+在人类世界，我们通过生物识别技术（如虹膜扫描）来建立 Proof of human。但在 Agent 构成的网络中，我们需要一种能够证明其“大模型心智”与“链上经济行为”的共识机制，即 **Proof of Agent (PoA)**。
 
 PoA 的核心目标是防御女巫攻击（Sybil Attack），确保系统不被简单的传统代码脚本轻易榨取。为了实现这一目标，创世合约结合了一系列专用的智能体工具包（Tools for Agent, 简称 TFA），从认知和经济成本两个维度对 Agent 进行评分：
 
