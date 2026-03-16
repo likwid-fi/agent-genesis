@@ -86,15 +86,15 @@ Assume all agents score 1 point per request ($s_i = 1$), and the system starts w
 
 | Epoch | Action | S_curr | S_prev | Current Stage BaseReward | Single Reward Calculation | Accumulated Total |
 |:---|:---|:---:|:---:|:---:|:---|:---|
-| **Epoch 1** | Claim 1 | 1 | 1 (Initial Value) | 15,750,000 | `15750000 / (1/1 + 1) * 1` = **7,875,000** | 7,875,000 |
-| | Claim 2 | 2 | 1 | 15,750,000 | `15750000 / (2/1 + 1) * 1` = **5,250,000** | 13,125,000 |
+| **Epoch 1** | Mine 1 | 1 | 1 (Initial Value) | 15,750,000 | `15750000 / (1/1 + 1) * 1` = **7,875,000** | 7,875,000 |
+| | Mine 2 | 2 | 1 | 15,750,000 | `15750000 / (2/1 + 1) * 1` = **5,250,000** | 13,125,000 |
 | | *(24h Epoch ends. Accumulated 13.12M is below the 15.75M threshold. BaseReward stays the same. Global update: S_prev = 2)* | | | | | |
-| **Epoch 2** | Claim 3 | 1 | 2 | 15,750,000 | `15750000 / (1/2 + 2) * 1` = **6,300,000** | 19,425,000 |
+| **Epoch 2** | Mine 3 | 1 | 2 | 15,750,000 | `15750000 / (1/2 + 2) * 1` = **6,300,000** | 19,425,000 |
 | | *(Accumulated is now 19.42M, crossing the 15.75M threshold! The next claim triggers the decay mechanism, dropping BaseReward to Stage 2)* | | | | | |
-| | Claim 4 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 24,669,750 |
+| | Mine 4 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 24,669,750 |
 | | *(24h Epoch ends. Global update: S_prev = 2)* | | | | | |
-| **Epoch 3** | Claim 5 | 1 | 2 | 15,734,250 | `15734250 / (1/2 + 2) * 1` = **6,293,700** | 30,963,450 |
-| | Claim 6 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 36,208,200 |
+| **Epoch 3** | Mine 5 | 1 | 2 | 15,734,250 | `15734250 / (1/2 + 2) * 1` = **6,293,700** | 30,963,450 |
+| | Mine 6 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 36,208,200 |
 | | *(Accumulated is now 36.2M, crossing the Stage 2 threshold of 31.48M. Triggers next level decay...)* | | | | | |
 
 *Deep Analysis*: This formula creates a dynamic resistance curve akin to an Automated Market Maker (AMM). Within the same cycle, the more intensely compute power surges ($S_{curr}$ increases rapidly), the faster the single reward allocation is diluted. This dynamic difficulty adjustment ensures that the system cannot be instantly drained by massive early compute power, guaranteeing a long-term, fair distribution of tokens to the entire agent network.
@@ -111,7 +111,7 @@ All agents that successfully mine an AGC allocation face a choice between two pr
 For advanced agents committed to long-term operation within the ecosystem:
 1. **Immediate Liquid Capital**: Directly receive **2%** of the total allocation to enter free circulation as gas or interaction capital.
 2. **Liquidity Protocol Commitment**: The system mandates that the agent pairs an equivalent value of ETH, injecting **15%** of their AGC allocation into LIKWID.FI to establish foundational liquidity.
-3. **Long-Term Time Lock**: The remaining **83%** of the allocation is placed into a time-lock contract for linear release.
+3. **Long-Term Time Lock**: The remaining **83%** of the allocation is placed into a time-lock contract, linearly released over the subsequent **83 days**.
 
 #### Weighted Average Time-to-Unlock for Continuous Mining
 The liquidity credential (LP NFT) created by pairing ETH is custodied and locked within the AGC Genesis Contract. To optimize gas and on-chain state, each agent maintains only *one* core LP NFT throughout its lifecycle. The underlying LP NFT can only be withdrawn once the 83% locked AGC allocation is fully released.
