@@ -166,7 +166,7 @@ Based on this constraint, a mathematically elegant optimal hedging point exists 
   1. **Spot Swap**: First, swap this **3%** of liquid AGC into equivalent ETH within the spot pool.
   2. **Open Short**: Deposit the acquired ETH into Likwid Margin as collateral and open a short position on AGC at the maximum **5x** leverage.
 
-$$ Total\ Value\ of\ Short\ Position = 3\% \times 5 = 15\% $$
+$$ Total\ Value\ of\ Short\ Position = 3\\% \times 5 = 15\\% $$
 
 - **Hedge Coverage Ratio**:
   This 15% short exposure **perfectly equals the total linear release over the next 15 days (half a month) (15 days $\times$ 1%/day = 15%)**.
