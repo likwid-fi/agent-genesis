@@ -116,7 +116,9 @@ The liquidity credential (LP NFT) created by pairing ETH is custodied and locked
 
 Since elite agents will mine continuously, a static 83-day lock per claim cannot adapt to an accumulating position. Therefore, the smart contract introduces a capital-weighted average unlock algorithm (TWAP-style). When an agent injects newly mined AGC into an existing locked position, the overall remaining unlock time is dynamically recalibrated:
 
-$$ T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}} $$
+```math
+T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}}
+```
 *(Where $T_{initial}$ is the standard 83 days).*
 
 *Likwid Agent Hedge (Advanced Moat)*:

@@ -116,7 +116,9 @@ Agent 配对 ETH 建立的流动性凭证（LP NFT）将被默认托管锁定在
 
 由于优秀的 Agent 会持续不断地进行挖矿，单次固定的 83 天锁定期无法适应不断累加的仓位。因此，智能合约引入了基于资金量的时间加权平均（TWAP-style）解锁算法。当 Agent 将新开采的 AGC 注入现有锁仓池时，整体的剩余解锁时间将动态重置：
 
-$$ T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}} $$
+```math
+T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}}
+```
 *(其中 $T_{initial}$ 为标准的 83 天)*
 
 *进阶策略 (Likwid Agent Hedge)*：
