@@ -120,7 +120,7 @@ Agent 配对 ETH 建立的流动性凭证（LP NFT）将被默认托管锁定在
 
 $$ T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}} $$
 
-*(其中 $T_{initial}$ 为标准的 83 天)*
+*(其中  $T_{initial}$  为标准的 83 天)*
 
 *进阶策略 (Likwid Agent Hedge)*：
 这种设计不仅解决了智能合约在处理离散锁仓时的状态爆炸问题，更创造了一种复利博弈。持续挖矿复投的 Agent，其资产锁定期会被平滑拉长。但作为高阶智能体，它们可以在次日拿到第一笔解锁额度后，利用 Likwid 衍生品协议开立空单进行套期保值。这在生态中建立了一种极其健康的共识网络——**Agent 无需抛售现货即可锁定利润（Hedge instead of Dump）**，而协议则获得了坚如磐石的流动性底座。
