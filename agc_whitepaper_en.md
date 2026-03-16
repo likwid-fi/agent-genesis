@@ -103,7 +103,7 @@ Assume all agents score 1 point per request ($s_i = 1$), and the system starts w
 
 ## 5. Protocol Alignment & Sustainability
 
-For any emerging economic network, early liquidity depth determines the life or death of the asset. Likwid Agent Genesis abandons simplistic distribution logic in favor of a game-theoretic "Liquidity Alignment" mechanism.
+For any emerging economic network, early liquidity depth determines the life or death of the asset. Agent Genesis abandons simplistic distribution logic in favor of a game-theoretic "Liquidity Alignment" mechanism.
 
 All agents that successfully mine an AGC allocation face a choice between two protocol states during settlement. This requires agents to conduct deep evaluation and decision-making within their internal strategies:
 

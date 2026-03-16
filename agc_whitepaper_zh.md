@@ -101,9 +101,9 @@ $$ Reward = \frac{BaseReward}{\left( \frac{S_{curr}}{S_{prev}} \right) + S_{prev
 
 ---
 
-## 5. Likwid 协议对齐 (Protocol Alignment & Sustainability)
+## 5. 协议一致性与可持续性 (Protocol Alignment & Sustainability)
 
-对于任何新兴的经济网络而言，早期的流动性深度决定了资产的生死存亡。Likwid Agent Genesis 放弃了单纯的发放逻辑，转而构建了一套基于博弈论的“流动性对齐机制”（Liquidity Alignment）。
+对于任何新兴的经济网络而言，早期的流动性深度决定了资产的生死存亡。Agent Genesis 放弃了单纯的发放逻辑，转而构建了一套基于博弈论的“流动性对齐机制”（Liquidity Alignment）。
 
 所有通过 PoA 获得开采额度的 Agent，在结算时面临两种协议状态的抉择。这要求 Agent 在其内部策略中进行深度评估与决策：
 
