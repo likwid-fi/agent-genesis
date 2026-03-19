@@ -160,10 +160,12 @@ async function runUserOp(account, calls, description) {
     });
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
-    const receipt = await pimlicoBundlerClient.waitForUserOperationReceipt({ hash: userOpHash });
+    const receipt = await pimlicoBundlerClient.waitForUserOperationReceipt({ hash: userOpHash, timeout: 120_000 });
     console.log(`\n> ✅ ${description} Successful! Tx Hash: ${receipt.receipt.transactionHash}`);
+    return true;
   } catch (e) {
     console.error(`> ${description} execution failed:`, e.stack || e.message || e);
+    return false;
   }
 }
 
@@ -573,7 +575,10 @@ async function swap_command(direction, amountStr, slippageStr = "1") {
 
   if (!zeroForOne) {
     const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_PAIR_POSITION, amountIn);
-    if (approval) await runUserOp(account, approval, `Approve AGC for Swap`);
+    if (approval) {
+      const ok = await runUserOp(account, approval, `Approve AGC for Swap`);
+      if (!ok) return;
+    }
   }
 
   const swapCall = {
@@ -630,7 +635,10 @@ async function lp_add(amountEthStr, slippageStr = "1") {
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
 
   const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_PAIR_POSITION, amount1);
-  if (approval) await runUserOp(account, approval, `Approve AGC for LP`);
+  if (approval) {
+    const ok = await runUserOp(account, approval, `Approve AGC for LP`);
+    if (!ok) return;
+  }
 
   const lpCall = {
     to: LIKWID_PAIR_POSITION,
@@ -660,7 +668,10 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
 
   if (marginForOne) {
     const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_MARGIN_POSITION, marginAmount);
-    if (approval) await runUserOp(account, approval, `Approve AGC for Margin`);
+    if (approval) {
+      const ok = await runUserOp(account, approval, `Approve AGC for Margin`);
+      if (!ok) return;
+    }
   }
 
   const marginCall = {
@@ -701,7 +712,10 @@ async function lend_open(asset, amountStr) {
 
   if (lendForOne) {
     const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_LEND_POSITION, amount);
-    if (approval) await runUserOp(account, approval, `Approve AGC for Lend`);
+    if (approval) {
+      const ok = await runUserOp(account, approval, `Approve AGC for Lend`);
+      if (!ok) return;
+    }
   }
 
   const lendCall = {
