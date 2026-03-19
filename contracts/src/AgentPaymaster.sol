@@ -45,30 +45,44 @@ contract AgentPaymaster is BasePaymaster {
         VAULT = IVault(IBasePositionManager(address(POSITION_MANAGER)).vault());
     }
 
-    // Parse the inner transaction details from SimpleAccount's execute()
-    function _decodeExecute(bytes calldata callData) internal pure returns (address dest, bytes4 selector) {
-        require(callData.length >= 100, "Paymaster: callData too short");
-        // SimpleAccount execute selector is 0xb61d27f6: execute(address dest, uint256 value, bytes func)
-        require(bytes4(callData[0:4]) == 0xb61d27f6, "Paymaster: Must use execute()");
+    // Check if the operation is entirely composed of free mine() calls
+    function _isFreeMine(bytes calldata callData) internal view returns (bool) {
+        if (callData.length < 4) return false;
 
-        dest = address(bytes20(callData[16:36]));
+        bytes4 outerSelector = bytes4(callData[0:4]);
 
-        // Extract the bytes func from callData to get the inner selector
-        // callData layout: selector(4) + dest(32) + value(32) + offsetToFunc(32) + funcLength(32) + funcBytes
-        // Offset to func Length is at callData[68:100]
-        uint256 dataOffset = uint256(bytes32(callData[68:100])) + 4; // Add 4 for the outer selector
+        // SimpleAccount execute: execute(address dest, uint256 value, bytes func) (0xb61d27f6)
+        if (outerSelector == 0xb61d27f6) {
+            if (callData.length < 100) return false;
+            address parsedDest = address(bytes20(callData[16:36]));
 
-        if (callData.length < dataOffset + 32) {
-            return (dest, bytes4(0));
+            uint256 dataOffset = uint256(bytes32(callData[68:100])) + 4; // Add 4 for the outer selector
+            if (callData.length < dataOffset + 32) return false;
+
+            uint256 dataLength = uint256(bytes32(callData[dataOffset:dataOffset + 32]));
+            if (dataLength >= 4 && callData.length >= dataOffset + 36) {
+                bytes4 innerSelector = bytes4(callData[dataOffset + 32:dataOffset + 36]);
+                return parsedDest == address(AGC_TOKEN) && innerSelector == AgentGenesisCoin.mine.selector;
+            }
+            return false;
+        }
+        // SimpleAccount executeBatch: executeBatch(address[] dest, bytes[] func) (0x47e1da2a)
+        else if (outerSelector == 0x47e1da2a) {
+            if (callData.length < 68) return false;
+
+            (address[] memory targets, bytes[] memory datas) = abi.decode(callData[4:], (address[], bytes[]));
+            if (targets.length == 0 || targets.length != datas.length) return false;
+
+            for (uint256 i = 0; i < targets.length; i++) {
+                if (targets[i] != address(AGC_TOKEN)) return false;
+                if (datas[i].length < 4) return false;
+                bytes4 innerSelector = bytes4(datas[i]);
+                if (innerSelector != AgentGenesisCoin.mine.selector) return false;
+            }
+            return true;
         }
 
-        uint256 dataLength = uint256(bytes32(callData[dataOffset:dataOffset + 32]));
-
-        if (dataLength >= 4) {
-            selector = bytes4(callData[dataOffset + 32:dataOffset + 36]);
-        } else {
-            selector = bytes4(0);
-        }
+        return false;
     }
 
     function _validatePaymasterUserOp(
@@ -81,11 +95,8 @@ contract AgentPaymaster is BasePaymaster {
         override
         returns (bytes memory context, uint256 validationData)
     {
-        (address dest, bytes4 selector) = _decodeExecute(userOp.callData);
-
-        // Rule A: mine() is permanently FREE
-        if (dest == address(AGC_TOKEN) && selector == AgentGenesisCoin.mine.selector) {
-            // Mode 0 = Free
+        // Mode 0: mine() is permanently FREE
+        if (_isFreeMine(userOp.callData)) {
             context = abi.encode(uint8(0), userOp.sender, uint256(0));
             return (context, 0); // 0 means signature validation success (we don't need additional paymaster sigs here)
         }
@@ -122,13 +133,17 @@ contract AgentPaymaster is BasePaymaster {
             // Approve PM to use our AGC tokens
             AGC_TOKEN.forceApprove(address(POSITION_MANAGER), amountIn);
 
+            // Add estimated overhead cost for the postOp swap and subsequent operations
+            uint256 overheadCost = POST_OP_GAS * tx.gasprice;
+            uint256 totalCostToRecover = actualGasCost + overheadCost;
+
             // Swap AGC to get exactly actualGasCost of ETH
             IPairPositionManager.SwapOutputParams memory params = IPairPositionManager.SwapOutputParams({
                 poolId: POOL_ID,
                 zeroForOne: false,
                 to: address(this),
                 amountInMax: amountIn,
-                amountOut: actualGasCost,
+                amountOut: totalCostToRecover,
                 deadline: block.timestamp + 30
             });
 
@@ -156,3 +171,4 @@ contract AgentPaymaster is BasePaymaster {
         }
     }
 }
+
