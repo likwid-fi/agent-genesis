@@ -325,13 +325,13 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         return reward;
     }
 
-    function _handleLiquidityProvision(uint256 liquidSyn, uint256 vestedSyn) internal {
-        _mint(address(this), liquidSyn);
-        _approve(address(this), LIKWID_POSITION_MANAGER, liquidSyn);
+    function _handleLiquidityProvision(uint256 liquidAGC, uint256 vestedAGC) internal {
+        _mint(address(this), liquidAGC);
+        _approve(address(this), LIKWID_POSITION_MANAGER, liquidAGC);
 
         // Params for Likwid
         uint256 amount0 = msg.value; // ETH
-        uint256 amount1 = liquidSyn; // SYN
+        uint256 amount1 = liquidAGC; // AGC
 
         VestingSchedule storage schedule = vestingSchedules[msg.sender];
         uint256 tokenId = schedule.lpTokenId;
@@ -345,18 +345,18 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
             });
             // Add Liquidity
             (uint256 newTokenId,) = IPairPositionManager(LIKWID_POSITION_MANAGER).addLiquidity{value: msg.value}(
-                poolKey, address(this), amount0, amount1, 0, liquidSyn, block.timestamp
+                poolKey, address(this), amount0, amount1, 0, liquidAGC, block.timestamp
             );
             schedule.lpTokenId = newTokenId;
         } else {
             // Increase Liquidity
             IPairPositionManager(LIKWID_POSITION_MANAGER).increaseLiquidity{value: msg.value}(
-                tokenId, amount0, amount1, 0, liquidSyn, block.timestamp
+                tokenId, amount0, amount1, 0, liquidAGC, block.timestamp
             );
         }
 
         // Setup Vesting
-        _setupVesting(msg.sender, vestedSyn);
+        _setupVesting(msg.sender, vestedAGC);
 
         // Refund Excess ETH
         uint256 ethRefund = address(this).balance;
