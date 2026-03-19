@@ -90,7 +90,7 @@ The system defines every 24 hours as one dynamic evaluation cycle (Epoch). Minin
 #### Core Formula
 
 $$
-Reward = \begin{cases} \dfrac{BaseReward \times s_i}{S_{prev}} & \text{if } S_{curr} \leq S_{prev} \\\\ \dfrac{BaseReward \times s_i}{S_{curr}} & \text{if } S_{curr} > S_{prev} \end{cases}
+Reward = \begin{cases} \dfrac{BaseReward \times s_i}{S_{prev}} & \text{if } S_{curr} \leq S_{prev} \\ \dfrac{BaseReward \times s_i}{S_{curr}} & \text{if } S_{curr} > S_{prev} \end{cases}
 $$
 
 **Variables:**
@@ -102,7 +102,7 @@ $$
 #### Key Constraints
 
 1. **Individual Score Hard Cap**: $s_i \leq 100$. Any raw TFA score exceeding 100 is truncated, preventing any single transaction from producing uncontrollable system impact.
-2. **Smoothed Difficulty Baseline**: $S_{prev} = \max\!\left(\dfrac{S_{n-1} + S_{n-2}}{2},\ 100\right)$, where $S_{n-1}$ and $S_{n-2}$ are the total cumulative scores of the previous and second-previous Epochs respectively. The two-epoch average acts as a low-pass filter, preventing a single anomalous Epoch (sudden surge or sudden lull) from causing violent rate swings the following day.
+2. **Smoothed Difficulty Baseline**: $S_{prev} = \max((S_{n-1} + S_{n-2}) / 2,\; 100)$, where $S_{n-1}$ and $S_{n-2}$ are the total cumulative scores of the previous and second-previous Epochs respectively. The two-epoch average acts as a low-pass filter, preventing a single anomalous Epoch (sudden surge or sudden lull) from causing violent rate swings the following day.
 3. **Difficulty Floor**: $S_{prev}$ can never fall below the default value of $100$ (`DEFAULT_LAST_SCORE`). This also serves as the system's cold-start initial value, ensuring a deterministic rate from Day 1: $Rate = BaseReward / 100$.
 
 #### Two-Phase Game Mechanism
@@ -133,13 +133,13 @@ Using `while` (rather than `if`) ensures that a single oversized transaction can
 
 #### Algorithmic Deduction Example
 
-Assume a cold start ($S_{prev} = 100$, `DEFAULT_LAST_SCORE`), $BaseReward = 15{,}750{,}000$.
+Assume a cold start ($S_{prev} = 100$, `DEFAULT_LAST_SCORE`), $BaseReward = 15,750,000$.
 
 | Epoch | Action | $s_i$ | $S_{curr}$ | $S_{prev}$ | Phase | Denominator | Single Reward | Accumulated Total |
 |:---|:---|:---:|:---:|:---:|:---:|:---:|:---|:---|
-| **Epoch 1** | Agent A Mine | 1 | 1 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 1 / 100$ = **157,500** | 157,500 |
-| | Agent B Mine | 50 | 51 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 50 / 100$ = **7,875,000** | 8,032,500 |
-| | Agent C Mine | 100 | 151 | 100 | Dynamic | 151 | $15{,}750{,}000 \times 100 / 151$ ≈ **10,430,463** | 18,462,963 |
+| **Epoch 1** | Agent A Mine | 1 | 1 | 100 | Fixed Rate | 100 | $15,750,000 \times 1 / 100$ = **157,500** | 157,500 |
+| | Agent B Mine | 50 | 51 | 100 | Fixed Rate | 100 | $15,750,000 \times 50 / 100$ = **7,875,000** | 8,032,500 |
+| | Agent C Mine | 100 | 151 | 100 | Dynamic | 151 | $15,750,000 \times 100 / 151$ ≈ **10,430,463** | 18,462,963 |
 | | *(Accumulated 18.46M crosses the Stage 1 decay line of 15.75M — cascade decay triggers, BaseReward adjusts downward)* | | | | | | | |
 | | Agent D Mine | 1 | 152 | 100 | Dynamic | 152 | $BaseReward' \times 1 / 152$ ≈ **103,454** | 18,566,417 |
 | | *(24h Epoch ends. S(n-1) = 152, S(n-2) = 100 (default))* | | | | | | | |
@@ -222,7 +222,7 @@ Based on this constraint, a mathematically elegant optimal hedging point exists 
   1. **Spot Swap**: First, swap this **3%** of liquid AGC into equivalent ETH within the spot pool.
   2. **Open Short**: Deposit the acquired ETH into Likwid Margin as collateral and open a short position on AGC at the maximum **5x** leverage.
 
-$$ Total\ Value\ of\ Short\ Position = 3\\% \times 5 = 15\\% $$
+$$Total\ Value\ of\ Short\ Position = 3\% \times 5 = 15\%$$
 
 - **Hedge Coverage Ratio**:
   This 15% short exposure **perfectly equals the total linear release over the next 15 days (half a month) (15 days $\times$ 1%/day = 15%)**.
