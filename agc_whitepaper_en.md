@@ -262,8 +262,8 @@ This does not align with the principles of decentralization. We are fully aware 
 | **Phase 0** (Current) | 2026 Q1 | Single-signature Owner control; centralized verifier |
 | **Phase 1** | 2026 Q2 | Owner transferred to 3/5 multisig; verifier code open-sourced; security audit completed |
 | **Phase 2** | 2026 Q3–Q4 | Verifier multi-node committee; epochLength and other parameters locked in contract |
-| **Phase 3** | 2027 H1 | Community governance voting; multisig only executes vote outcomes; PoA moved on-chain |
-| **Phase 4** | 2027 H2+ | Full DAO governance; Owner privileges permanently destroyed |
+| **Phase 3** | 2026 Q4 | Community governance voting; multisig only executes vote outcomes; PoA moved on-chain |
+| **Phase 4** | 2026 Q4 | Full DAO governance; Owner privileges permanently destroyed |
 
 ### 7.3 Structured Transparency Commitment
 

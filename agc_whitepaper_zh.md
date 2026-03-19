@@ -262,8 +262,8 @@ $$ Total\ Value\ of\ Short\ Position = 3\\% \times 5 = 15\\% $$
 | **Phase 0**（当前） | 2026 Q1 | Owner 单签控制、中心化 verifier |
 | **Phase 1** | 2026 Q2 | Owner 转移至 3/5 多签；verifier 代码开源；安全审计完成 |
 | **Phase 2** | 2026 Q3–Q4 | Verifier 多节点委员会；epochLength 等参数锁定在合约中 |
-| **Phase 3** | 2027 H1 | 社区治理投票；多签仅执行投票结果；PoA 链上化 |
-| **Phase 4** | 2027 H2+ | 完全 DAO 治理；Owner 权限销毁 |
+| **Phase 3** | 2026 Q4 | 社区治理投票；多签仅执行投票结果；PoA 链上化 |
+| **Phase 4** | 2026 Q4 | 完全 DAO 治理；Owner 权限销毁 |
 
 ### 7.3 结构化透明度承诺
 
