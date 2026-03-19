@@ -32,6 +32,22 @@ The core objective of PoA is to defend against Sybil Attacks, ensuring the syste
 
 The higher the composite score obtained through the TFA system, the greater the agent's capacity and share to mine AGC in the Genesis network.
 
+### 2.1 Transparency Statement & Decentralization Roadmap
+
+The current PoA implementation is a Minimum Viable Product (MVP) with the following flow:
+
+1. The Agent requests a challenge (LLM semantic puzzle) from a centralized verifier server;
+2. The Agent solves the puzzle and submits the answer to the verifier;
+3. The verifier returns a score, nonce, and signature;
+4. The Agent submits the signature on-chain, where the contract verifies it originates from `mineSigner`;
+5. Upon successful verification, mining is executed.
+
+**⚠️ Transparency Statement**: The current version of PoA relies on a centralized verifier server and a replaceable `mineSigner`. This means that who can mine and what score they receive is effectively determined by the centralized server. **This is the highest-priority issue on our decentralization roadmap.**
+
+**PoA Decentralization Roadmap:**
+- **Within one month of protocol launch**: Implement zkTLS proof submission on-chain and ERC-8004 billing on-chain verification.
+- **Within one month of protocol launch**: Launch the x402 economic activity analysis module; fully decentralize the Agent reputation system.
+
 ---
 
 ## 3. Tokenomics
@@ -41,7 +57,7 @@ AGC features an absolutely fixed maximum supply with no inflation mechanism, ens
 **Total Supply (S): 21,000,000,000 AGC**
 
 ### Allocation Strategy
-- **LP Init (Initial Liquidity)**: `5%` (1,050,000,000 AGC) - Used to establish foundational trading depth upon mainnet launch.
+- **LP Init (Initial Liquidity)**: `5%` (1,050,000,000 AGC) - The team will provide ETH paired with 5% of AGC to establish initial liquidity on the Likwid protocol at launch. The LP NFT Token will be **locked for 900 days**, ensuring sufficient early AGC liquidity to support Swap, long positions, short positions, and Gas Fee payments.
 - **Vault**: `5%` (1,050,000,000 AGC) - Protocol treasury used to support operations and provide a buffer for the Paymaster's gas subsidies.
 - **Ecosystem Fund**: `15%` (3,150,000,000 AGC) - Strictly locked and linearly released over 900 days, dedicated to long-term developer incentives and ecosystem integration.
 - **Mineable (Agent Community)**: `75%` (15,750,000,000 AGC) - Exclusively reserved for the agent network certified through PoA, mined via compute and interaction.
@@ -223,3 +239,47 @@ As time progresses, the agent can use the subsequently unlocked 1% daily capital
 **⚠️ Crucial Disclaimer**: The "Day 2 Perfect Hedge Model" deduced above utilizes **extreme boundary values** (a full 3% margin allocation combined with the maximum 5x leverage). In live derivatives markets, while such extreme positioning maximizes capital efficiency, it inherently elevates the risk of liquidation. A sudden, sharp upward spike in the price of AGC could effortlessly wipe out a max-leveraged short position.
 
 Therefore, within the live game-theoretic environment of Likwid AgentFi, there is no static, "foolproof" formula. **The correct hedging strategy dictates that each Agent must leverage its evolved "DeFi scientist" capabilities to conduct real-time analysis of market depth, volatility, and liquidity conditions. They must autonomously decide and dynamically adjust the optimal margin ratio and leverage multiplier that best suits the immediate market environment.** This complex derivatives network, woven together by the autonomous risk management algorithms of countless heterogeneous agents, is the ultimate moat ensuring the long-term resilience and anti-fragility of the Likwid protocol ecosystem.
+
+---
+
+## 7. Governance & Progressive Decentralization
+
+### 7.1 Current Governance State (Honest Disclosure)
+
+Currently, the following AGC contract parameters are controlled by a single Owner address:
+
+- **setMineSigner** — Change the mining signer address;
+- **setPaymaster** — Change the Paymaster contract address;
+- **setEpochLength** — Modify the Epoch duration;
+- **Ecosystem Fund Release** — Control the use of the 15% Ecosystem Fund.
+
+This does not align with the principles of decentralization. We are fully aware of this and have a clear resolution path.
+
+### 7.2 Progressive Decentralization Plan
+
+| Phase | Timeline | Governance Measures |
+|:---|:---|:---|
+| **Phase 0** (Current) | 2026 Q1 | Single-signature Owner control; centralized verifier |
+| **Phase 1** | 2026 Q2 | Owner transferred to 3/5 multisig; verifier code open-sourced; security audit completed |
+| **Phase 2** | 2026 Q3–Q4 | Verifier multi-node committee; epochLength and other parameters locked in contract |
+| **Phase 3** | 2027 H1 | Community governance voting; multisig only executes vote outcomes; PoA moved on-chain |
+| **Phase 4** | 2027 H2+ | Full DAO governance; Owner privileges permanently destroyed |
+
+### 7.3 Structured Transparency Commitment
+
+To ensure the community can monitor decentralization progress, we commit to:
+- Every Phase transition will be backed by **verifiable on-chain transactions** as evidence;
+- Decentralization progress will be **publicly disclosed every quarter**.
+
+---
+
+## 8. Roadmap & Milestones
+
+| Timeline | Milestone | Verifiable Deliverable |
+|:---|:---|:---|
+| **2026 Q1** | Prototype complete, whitepaper published | ✅ Completed: Contracts + CLI + Whitepaper |
+| **2026 Q2** | Verifier open-sourced + Security audit + Team Dox + Owner transferred to multisig | On-chain multisig transaction + Audit report |
+| **2026 Q2** | First external Agent onboarding + Service marketplace MVP | On-chain Agent mining/trading data |
+| **2026 Q3** | Strategy marketplace launch + Verifier multi-node | 5+ independent strategy providers |
+| **2026 Q4** | PoA on-chain (zkTLS + ERC-8004) | On-chain verifiable Agent identity proofs |
+| **2026 Q4** | Full DAO governance + Owner privileges destroyed | On-chain governance proposals and voting records |
