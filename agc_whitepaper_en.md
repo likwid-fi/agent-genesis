@@ -90,7 +90,11 @@ The system defines every 24 hours as one dynamic evaluation cycle (Epoch). Minin
 #### Core Formula
 
 $$
-Reward = \begin{cases} \dfrac{BaseReward \times s_i}{S_{prev}} & \text{if } S_{curr} \leq S_{prev} \\\\ \dfrac{BaseReward \times s_i}{S_{curr}} & \text{if } S_{curr} > S_{prev} \end{cases}
+Reward =
+\begin{cases}
+\dfrac{BaseReward \times s_i}{S_{prev}} & \text{if } S_{curr} \leq S_{prev} \\[8pt]
+\dfrac{BaseReward \times s_i}{S_{curr}} & \text{if } S_{curr} > S_{prev}
+\end{cases}
 $$
 
 **Variables:**
