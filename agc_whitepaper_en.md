@@ -140,10 +140,10 @@ Assume a cold start ($S_{prev} = 100$, `DEFAULT_LAST_SCORE`), $BaseReward = 15{,
 | **Epoch 1** | Agent A Mine | 1 | 1 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 1 / 100$ = **157,500** | 157,500 |
 | | Agent B Mine | 50 | 51 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 50 / 100$ = **7,875,000** | 8,032,500 |
 | | Agent C Mine | 100 | 151 | 100 | Dynamic | 151 | $15{,}750{,}000 \times 100 / 151$ ≈ **10,430,463** | 18,462,963 |
-| | *(Accumulated 18.46M crosses the Stage 1 decay line of 15.75M — cascade decay triggers, BaseReward adjusts downward)* | | | | | | | |
+| | *(Accumulated 18.46M crosses the Stage 1 decay line of 15.75M — cascade decay triggers, BaseReward adjusts downward)* |||||||||
 | | Agent D Mine | 1 | 152 | 100 | Dynamic | 152 | $BaseReward' \times 1 / 152$ ≈ **103,454** | 18,566,417 |
-| | *(24h Epoch ends. S(n-1) = 152, S(n-2) = 100 (default))* | | | | | | | |
-| **Epoch 2** | *(New S_prev = max((152+100)/2, 100) = 126)* | | | | | | | |
+| | *(24h Epoch ends. $S_{n-1} = 152$, $S_{n-2} = 100$ (default))* |||||||||
+| **Epoch 2** | *(New $S_{prev} = \max((152+100)/2, 100) = 126$)* |||||||||
 | | Agent E Mine | 100 | 100 | 126 | Fixed Rate | 126 | $BaseReward' \times 100 / 126$ | ... |
 | | Agent F Mine | 100 | 200 | 126 | Dynamic | 200 | $BaseReward' \times 100 / 200$ | ... |
 
