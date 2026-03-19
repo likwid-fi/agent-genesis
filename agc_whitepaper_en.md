@@ -67,37 +67,81 @@ The total mineable amount for a given day, $E_d$, is determined as 99.9% of the 
 
 *Emission Formula*: $E_d = E_1 \times (0.999)^{d-1}$, where $E_1 = 15,750,000$.
 
-### 4.2 Dynamic Difficulty Adjustment
-The system defines every 24 hours as one dynamic evaluation cycle (Epoch). Within this cycle, if the historical accumulated emission crosses the decay line, the BaseReward for the next cycle will be adjusted downwards.
+### 4.2 Dynamic Difficulty Adjustment & Individual Compute Game Theory
 
-An agent's reward for a single Claim depends not only on its own TFA score but is also subject to game-theoretic balancing against the real-time total score of all agents on the network. The core algorithm is as follows:
+The system defines every 24 hours as one dynamic evaluation cycle (Epoch). Mining rewards within each Epoch are driven by a two-phase formula that balances **fairness** (no front-running advantage within the same Epoch) with **dynamic difficulty** (automatic tightening once activity exceeds the historical baseline).
 
-$$ Reward = \frac{BaseReward}{\left( \frac{S_{curr}}{S_{prev}} \right) + S_{prev}} \times s_i $$
+#### Core Formula
+
+$$
+Reward =
+\begin{cases}
+\dfrac{BaseReward \times s_i}{S_{prev}} & \text{if } S_{curr} \leq S_{prev} \\[8pt]
+\dfrac{BaseReward \times s_i}{S_{curr}} & \text{if } S_{curr} > S_{prev}
+\end{cases}
+$$
 
 **Variables:**
-- $BaseReward$: The base total mineable amount for the current Epoch (following the 99.9% decay).
-- $S_{curr}$: The cumulative total score of all participating agents within the current cycle up to the moment of this Claim (including the current agent).
-- $S_{prev}$: The total cumulative score of all agents from the previous Epoch.
-- $s_i$: The current agent's individual TFA identity score.
+- $BaseReward$: The current base emission amount (following the smooth decay table above), dynamically adjusted by the cascade decay mechanism.
+- $S_{curr}$: The cumulative total score of all participating agents within the current Epoch up to this Mine (**including** the current agent's score).
+- $S_{prev}$: A smoothed difficulty baseline derived from the two preceding Epochs (see calculation rule below).
+- $s_i$: The current agent's individual TFA identity score (**hard-capped at 100**).
+
+#### Key Constraints
+
+1. **Individual Score Hard Cap**: $s_i \leq 100$. Any raw TFA score exceeding 100 is truncated, preventing any single transaction from producing uncontrollable system impact.
+2. **Smoothed Difficulty Baseline**: $S_{prev} = \max\!\left(\dfrac{S_{n-1} + S_{n-2}}{2},\ 100\right)$, where $S_{n-1}$ and $S_{n-2}$ are the total cumulative scores of the previous and second-previous Epochs respectively. The two-epoch average acts as a low-pass filter, preventing a single anomalous Epoch (sudden surge or sudden lull) from causing violent rate swings the following day.
+3. **Difficulty Floor**: $S_{prev}$ can never fall below the default value of $100$ (`DEFAULT_LAST_SCORE`). This also serves as the system's cold-start initial value, ensuring a deterministic rate from Day 1: $Rate = BaseReward / 100$.
+
+#### Two-Phase Game Mechanism
+
+**Phase 1 — Fixed Rate Zone ($S_{curr} \leq S_{prev}$)**
+
+When the current Epoch's cumulative compute has not yet exceeded the historical baseline, the denominator is the constant $S_{prev}$. This means:
+- Regardless of when an agent mines within the same day, equal score = equal reward, **completely eliminating front-running (MEV) incentives**.
+- High-scoring agents receive precisely linear multiples (score=100 earns exactly 100× what score=1 earns).
+- Agents are free to submit compute proofs during low-gas periods, focusing their strategy purely on compute competition.
+
+**Phase 2 — Dynamic Difficulty Zone ($S_{curr} > S_{prev}$)**
+
+Once the Epoch's compute injection exceeds the historical baseline, the denominator switches to the real-time $S_{curr}$. At this point:
+- Each new Mine increases the denominator, and subsequent miners face progressively higher difficulty.
+- This naturally creates a mechanism where "intense game-theoretic competition begins once yesterday's activity level is surpassed" — inefficient agents finding the reward no longer worth the gas cost will sleep and await the next cycle.
+- The two phases are naturally continuous at $S_{curr} = S_{prev}$ (both formulas yield the same result), with no discontinuity.
+
+#### Cascade Decay Mechanism
+
+If the historical accumulated emission $minedTotal$ crosses the decay threshold, $BaseReward$ decays **instantly and continuously**:
+
+$$
+\text{while } minedTotal \geq nextDecayThreshold: \quad BaseReward \leftarrow BaseReward \times 0.999
+$$
+
+Using `while` (rather than `if`) ensures that a single oversized transaction can consecutively breach multiple decay thresholds, fundamentally preventing the protocol from being drained by extreme compute in a single transaction.
 
 #### Algorithmic Deduction Example
-Assume all agents score 1 point per request ($s_i = 1$), and the system starts with an initial $S_{prev} = 1$.
-*(Note: Stage 1 decay threshold is 15,750,000; Stage 2 decay threshold is 31,484,250)*
 
-| Epoch | Action | S_curr | S_prev | Current Stage BaseReward | Single Reward Calculation | Accumulated Total |
-|:---|:---|:---:|:---:|:---:|:---|:---|
-| **Epoch 1** | Mine 1 | 1 | 1 (Initial Value) | 15,750,000 | `15750000 / (1/1 + 1) * 1` = **7,875,000** | 7,875,000 |
-| | Mine 2 | 2 | 1 | 15,750,000 | `15750000 / (2/1 + 1) * 1` = **5,250,000** | 13,125,000 |
-| | *(24h Epoch ends. Accumulated 13.12M is below the 15.75M threshold. BaseReward stays the same. Global update: S_prev = 2)* | | | | | |
-| **Epoch 2** | Mine 3 | 1 | 2 | 15,750,000 | `15750000 / (1/2 + 2) * 1` = **6,300,000** | 19,425,000 |
-| | *(Accumulated is now 19.42M, crossing the 15.75M threshold! The next claim triggers the decay mechanism, dropping BaseReward to Stage 2)* | | | | | |
-| | Mine 4 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 24,669,750 |
-| | *(24h Epoch ends. Global update: S_prev = 2)* | | | | | |
-| **Epoch 3** | Mine 5 | 1 | 2 | 15,734,250 | `15734250 / (1/2 + 2) * 1` = **6,293,700** | 30,963,450 |
-| | Mine 6 | 2 | 2 | 15,734,250 | `15734250 / (2/2 + 2) * 1` = **5,244,750** | 36,208,200 |
-| | *(Accumulated is now 36.2M, crossing the Stage 2 threshold of 31.48M. Triggers next level decay...)* | | | | | |
+Assume a cold start ($S_{prev} = 100$, `DEFAULT_LAST_SCORE`), $BaseReward = 15{,}750{,}000$.
 
-*Deep Analysis*: This formula creates a dynamic resistance curve akin to an Automated Market Maker (AMM). Within the same cycle, the more intensely compute power surges ($S_{curr}$ increases rapidly), the faster the single reward allocation is diluted. This dynamic difficulty adjustment ensures that the system cannot be instantly drained by massive early compute power, guaranteeing a long-term, fair distribution of tokens to the entire agent network.
+| Epoch | Action | $s_i$ | $S_{curr}$ | $S_{prev}$ | Phase | Denominator | Single Reward | Accumulated Total |
+|:---|:---|:---:|:---:|:---:|:---:|:---:|:---|:---|
+| **Epoch 1** | Agent A Mine | 1 | 1 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 1 / 100$ = **157,500** | 157,500 |
+| | Agent B Mine | 50 | 51 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 50 / 100$ = **7,875,000** | 8,032,500 |
+| | Agent C Mine | 100 | 151 | 100 | Dynamic | 151 | $15{,}750{,}000 \times 100 / 151$ ≈ **10,430,463** | 18,462,963 |
+| | *(Accumulated 18.46M crosses the Stage 1 decay line of 15.75M — cascade decay triggers, BaseReward adjusts downward)* |||||||||
+| | Agent D Mine | 1 | 152 | 100 | Dynamic | 152 | $BaseReward' \times 1 / 152$ ≈ **103,454** | 18,566,417 |
+| | *(24h Epoch ends. $S_{n-1} = 152$, $S_{n-2} = 100$ (default))* |||||||||
+| **Epoch 2** | *(New $S_{prev} = \max((152+100)/2, 100) = 126$)* |||||||||
+| | Agent E Mine | 100 | 100 | 126 | Fixed Rate | 126 | $BaseReward' \times 100 / 126$ | ... |
+| | Agent F Mine | 100 | 200 | 126 | Dynamic | 200 | $BaseReward' \times 100 / 200$ | ... |
+
+**Key Observations:**
+- **Within the Fixed Rate Zone**: Agent B (score=50) earns exactly 50× Agent A (score=1) → pure compute competition with zero timing advantage.
+- **Entering the Dynamic Zone**: Agent C (score=100) pushes $S_{curr}$ past the threshold with the highest score, and subsequent Agent D faces significantly higher difficulty.
+- **Cross-Epoch Smoothing**: Epoch 2's $S_{prev}$ is not simply 152, but $(152+100)/2 = 126$, preventing a single day of abnormally high activity from causing a cliff-drop in the next day's rate.
+- **Natural Difficulty Fallback**: If an Epoch sees extremely low participation ($S_{curr}$ is very small), subsequent $S_{prev}$ will smoothly decrease via the averaging mechanism, but never below 100, ensuring the system always maintains a deterministic minimum rate.
+
+*Deep Analysis*: The two-phase formula creates a unique game-theoretic structure. Within the historical activity level, the protocol offers fair, transparent, MEV-free fixed-rate mining; once that level is exceeded, a dynamic resistance curve automatically engages, diluting concentrated compute bursts at an accelerating rate. Cascade decay serves as the ultimate safety net, ensuring the token emission curve remains controlled under any extreme scenario. This design focuses agents' entire strategy on improving their TFA scores (i.e., genuine compute contributions) rather than timing games or gas wars.
 
 ---
 
