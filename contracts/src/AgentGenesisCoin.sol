@@ -37,6 +37,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     uint256 public constant MINING_ALLOCATION = 15_750_000_000 ether; // 75%
 
     uint256 public constant DEFAULT_LAST_SCORE = 100; // Default score for first-time miners to prevent zero rewards
+    uint256 public constant MAX_SCORE = 100; // Maximum score per mine
     uint256 public constant DECAY_RATE = 999; // 99.9%
     uint256 public constant VESTING_DURATION = 83 days;
     uint256 public constant ECOSYSTEM_VESTING_DURATION = 900 days;
@@ -59,6 +60,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     uint256 public currentEpochEndTime;
     uint256 public totalScoreInCurrentEpoch;
     uint256 public totalScoreInLastEpoch;
+    uint256 public totalScoreInSecondLastEpoch;
 
     // --- User State ---
     mapping(address => uint256) public lastMineTime;
@@ -95,6 +97,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         LIKWID_POSITION_MANAGER = _likwidPm;
         currentEpochEndTime = block.timestamp + epochLength;
         totalScoreInLastEpoch = DEFAULT_LAST_SCORE;
+        totalScoreInSecondLastEpoch = DEFAULT_LAST_SCORE;
 
         // --- Initial Allocations ---
         _mint(msg.sender, LP_INITIAL_ALLOCATION + VAULT_ALLOCATION);
@@ -139,16 +142,29 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
     function getEstimatedReward(uint256 score) public view returns (uint256) {
         if (score == 0) return 0;
+        if (score > MAX_SCORE) score = MAX_SCORE;
+
         uint256 currentScore = totalScoreInCurrentEpoch;
         uint256 lastScore = totalScoreInLastEpoch;
+        uint256 secondLastScore = totalScoreInSecondLastEpoch;
+
         if (block.timestamp > currentEpochEndTime) {
+            secondLastScore = lastScore;
             lastScore = currentScore > 0 ? currentScore : DEFAULT_LAST_SCORE;
             currentScore = 0;
         }
+
+        // S_prev = max(avg(S_{n-1}, S_{n-2}), DEFAULT_LAST_SCORE)
+        uint256 sPrev = (lastScore + secondLastScore) / 2;
+        if (sPrev < DEFAULT_LAST_SCORE) sPrev = DEFAULT_LAST_SCORE;
+
+        // Pre-update: include this score in S_curr
         currentScore += score;
-        uint256 numerator = baseReward * lastScore;
-        uint256 denominator = currentScore + (lastScore * lastScore);
-        return (numerator * score) / denominator;
+
+        // Two-phase denominator
+        uint256 denominator = currentScore <= sPrev ? sPrev : currentScore;
+
+        return (baseReward * score) / denominator;
     }
 
     function getTimeUntilCanMine(address user) public view returns (uint256) {
@@ -188,6 +204,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
         // 3. Epoch Rotation Check
         if (block.timestamp > currentEpochEndTime) {
+            totalScoreInSecondLastEpoch = totalScoreInLastEpoch;
             totalScoreInLastEpoch = totalScoreInCurrentEpoch > 0 ? totalScoreInCurrentEpoch : DEFAULT_LAST_SCORE;
             totalScoreInCurrentEpoch = 0;
             currentEpochEndTime = block.timestamp + epochLength;
@@ -201,16 +218,8 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         address signer = ECDSA.recover(ethSignedMessageHash, signature);
         if (signer != mineSigner) revert InvalidSignature();
 
-        // 5. Calculate Reward
+        // 5. Calculate Reward with cascade decay
         uint256 reward = _applyScoreAndCalculateReward(score);
-
-        // 6. Update Decay
-        minedTotal += reward;
-        if (minedTotal >= nextDecayThreshold) {
-            baseReward = (baseReward * DECAY_RATE) / 1000;
-            nextDecayThreshold += baseReward;
-            emit DecayTriggered(baseReward, nextDecayThreshold);
-        }
 
         // 7. Distribution Logic
         uint256 gasPart = (reward * 2) / 100;
@@ -279,15 +288,40 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
     function _applyScoreAndCalculateReward(uint256 score) internal returns (uint256) {
         if (score == 0) return 0;
-        totalScoreInCurrentEpoch += score;
-        uint256 numerator = baseReward * totalScoreInLastEpoch;
-        uint256 denominator = totalScoreInCurrentEpoch + (totalScoreInLastEpoch * totalScoreInLastEpoch);
-        uint256 reward = (numerator * score) / denominator;
 
+        // Cap individual score
+        if (score > MAX_SCORE) score = MAX_SCORE;
+
+        // Pre-update: add score to S_curr first
+        totalScoreInCurrentEpoch += score;
+
+        // S_prev = max(avg(S_{n-1}, S_{n-2}), DEFAULT_LAST_SCORE)
+        uint256 sPrev = (totalScoreInLastEpoch + totalScoreInSecondLastEpoch) / 2;
+        if (sPrev < DEFAULT_LAST_SCORE) sPrev = DEFAULT_LAST_SCORE;
+
+        // Two-phase denominator:
+        //   Phase 1 (S_curr <= S_prev): fixed rate, no front-running
+        //   Phase 2 (S_curr > S_prev): dynamic difficulty
+        uint256 denominator = totalScoreInCurrentEpoch <= sPrev
+            ? sPrev
+            : totalScoreInCurrentEpoch;
+
+        uint256 reward = (baseReward * score) / denominator;
+
+        // MAX_SUPPLY protection
         if (totalSupply() + reward > MAX_SUPPLY) {
             uint256 remaining = MAX_SUPPLY - totalSupply();
-            return remaining >= MIN_REWARD_THRESHOLD ? remaining : 0;
+            reward = remaining >= MIN_REWARD_THRESHOLD ? remaining : 0;
         }
+
+        // Cascade decay
+        minedTotal += reward;
+        while (minedTotal >= nextDecayThreshold) {
+            baseReward = (baseReward * DECAY_RATE) / 1000;
+            nextDecayThreshold += baseReward;
+            emit DecayTriggered(baseReward, nextDecayThreshold);
+        }
+
         return reward;
     }
 
