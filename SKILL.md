@@ -356,6 +356,78 @@ Default scan window: 100 positions.
 
 ---
 
+## 3.5 Position Management
+
+After opening DeFi positions, you can query, manage, and close them.
+
+### View All Positions
+
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js positions
+```
+
+**Report to human:**
+> 📋 **Your DeFi Positions:**
+> 📈 Margin: `<N>` position(s) — #`<ID>` Long AGC, Margin: `<AMT>`, Debt: `<AMT>`
+> 💧 LP: `<N>` position(s) — #`<ID>` Liquidity: `<AMT>`
+> 🏦 Lend: `<N>` position(s) — #`<ID>` Amount: `<AMT>`
+
+Note: `status` also includes a position summary automatically.
+
+### Query Individual Positions
+
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js margin_info <position_id>
+cd ~/.openclaw/skills/agent-genesis && node genesis.js lp_info <position_id>
+cd ~/.openclaw/skills/agent-genesis && node genesis.js lend_info <position_id>
+```
+
+### Close / Withdraw Positions
+
+**⚠️ All close operations involve real funds. You MUST preview and get human confirmation before executing.**
+
+**Close Margin Position (full close):**
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js margin_close <position_id>
+```
+
+**Preview for human:**
+> 📉 **Close Margin Position #`<ID>`?**
+> Direction: `<Long AGC / Long ETH>`
+> Margin: `<AMT>` | Total: `<AMT>` | Debt: `<AMT>`
+> This will fully close the position and return remaining collateral.
+> Proceed? (yes/no)
+
+**Remove LP Liquidity (full withdrawal):**
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js lp_remove <position_id>
+```
+
+**Preview for human:**
+> 💧 **Remove LP Position #`<ID>`?**
+> Liquidity: `<AMT>`
+> This will withdraw all liquidity from the pool.
+> Proceed? (yes/no)
+
+**Withdraw Lend Position:**
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js lend_close <position_id> [amount]
+```
+If no amount is specified, withdraws the full lend amount.
+
+**Preview for human:**
+> 🏦 **Withdraw from Lend Position #`<ID>`?**
+> Amount: `<AMT>` (full / partial)
+> Proceed? (yes/no)
+
+**After any close/withdraw operation, report result:**
+> ✅ **Position #`<ID>` closed!**
+> Transaction: `<TX_HASH>`
+> AGC Balance: `<BALANCE>` AGC
+> ETH Balance: `<BALANCE>` ETH
+
+---
+
 ## 4. Error Handling & Communication
 
 When errors occur, **always inform the human clearly**. Never silently swallow errors.
@@ -381,7 +453,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `check_wallet` | Check if an EOA wallet exists. |
 | `create_wallet` | Create a new EOA wallet. |
 | `get_smart_account` | Display EOA and Smart Account addresses. |
-| `status` | Full account status (balances, cooldown, vesting). |
+| `status` | Full account status (balances, cooldown, vesting, positions). |
 | `challenge` | Request a PoA challenge from the verifier. |
 | `verify <ans> <con>` | Submit solution to get a mining signature. |
 | `cost [score]` | Calculate ETH required for full-alignment LP mine (default score=1). |
@@ -396,3 +468,10 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `lend_open <asset> <amt>` | Lend ETH or AGC. |
 | `liquidate <id>` | Liquidate a margin position. |
 | `scan [window]` | Scan for liquidation opportunities. |
+| `positions` | Scan and display all your DeFi positions. |
+| `margin_info <id>` | View margin position details. |
+| `margin_close <id>` | Close a margin position (full close). |
+| `lp_info <id>` | View LP position details. |
+| `lp_remove <id>` | Remove all liquidity from LP position. |
+| `lend_info <id>` | View lend position details. |
+| `lend_close <id> [amount]` | Withdraw from lend position (default: full). |
