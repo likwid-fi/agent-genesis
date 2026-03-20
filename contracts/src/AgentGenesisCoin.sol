@@ -112,6 +112,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     }
 
     // --- Admin ---
+    //Once the token deployment is complete, a new owner will be established. The new owner is a multi-signature address, and all configurable parameters will be handled by this community-operated multi-signature address.
     function setPaymaster(address _paymaster) external onlyOwner {
         if (paymasterLocked) revert PaymasterAlreadyLocked();
         if (_paymaster == address(0)) revert InvalidPaymasterAddress();
