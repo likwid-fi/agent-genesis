@@ -25,8 +25,8 @@ const BUNDLER_URL = `https://api.pimlico.io/v2/11155111/rpc?apikey=${PIMLICO_API
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x9Ba992CA612788FA58476ddEa382C32AB2255ca3";
-const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0x33eeD2A4D3D6B9E101bdC689e8BD7260F2485613";
+const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x33657d1629913DeD856A7f0040dA1159Aa06f47d";
+const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0x7a4Ee392DF05355a179ae16558e86EAEDAd3b753";
 // Likwid DeFi Constants
 const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
 const LIKWID_PAIR_POSITION = process.env.LIKWID_PAIR_POSITION || "0xA8296e28c62249f89188De0499a81d6AD993a515";
@@ -166,8 +166,9 @@ async function runUserOp(account, calls, description) {
 
   console.log(`> Packaging UserOperation for ${description}...`);
   try {
+    const callData = Array.isArray(calls) ? await account.encodeCallData(calls) : await account.encodeCallData([calls]);
     const userOpHash = await smartAccountClient.sendUserOperation({
-      userOperation: { callData: await account.encodeCallData(calls) },
+      userOperation: { callData },
     });
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
@@ -225,17 +226,32 @@ async function check_wallet() {
   if (signer) {
     const account = await getSmartAccount(signer);
 
-    let ethBalEOA = 0n, ethBalSA = 0n, agcBalEOA = 0n, agcBalSA = 0n;
+    let ethBalEOA = 0n,
+      ethBalSA = 0n,
+      agcBalEOA = 0n,
+      agcBalSA = 0n;
     try {
       [ethBalEOA, ethBalSA] = await Promise.all([
         publicClient.getBalance({ address: signer.address }),
         publicClient.getBalance({ address: account.address }),
       ]);
       [agcBalEOA, agcBalSA] = await Promise.all([
-        publicClient.readContract({ address: AGC_TOKEN_ADDRESS, abi: ERC20_ABI, functionName: "balanceOf", args: [signer.address] }),
-        publicClient.readContract({ address: AGC_TOKEN_ADDRESS, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] }),
+        publicClient.readContract({
+          address: AGC_TOKEN_ADDRESS,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [signer.address],
+        }),
+        publicClient.readContract({
+          address: AGC_TOKEN_ADDRESS,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [account.address],
+        }),
       ]);
-    } catch (e) { /* contract may not exist yet */ }
+    } catch (e) {
+      /* contract may not exist yet */
+    }
 
     console.log(`> 🔑 Wallet Status: Found`);
     console.log(`>`);
@@ -335,9 +351,7 @@ async function status() {
     // Contract may not be deployed yet
   }
 
-  const miningStatus = cooldownSec === 0n
-    ? "✅ Yes"
-    : `⏳ No — ${formatHumanSeconds(cooldownSec)} remaining`;
+  const miningStatus = cooldownSec === 0n ? "✅ Yes" : `⏳ No — ${formatHumanSeconds(cooldownSec)} remaining`;
 
   console.log(`> 📊 Account Status`);
   console.log(`> Address: ${account.address}`);
@@ -370,7 +384,9 @@ async function status() {
         console.log(`>   📈 Margin: ${marginPositions.length} position(s)`);
         for (const p of marginPositions) {
           const dir = p.marginForOne ? "Long AGC" : "Long ETH";
-          console.log(`>     #${p.id} ${dir} | Margin: ${(Number(p.marginAmount) / 1e18).toFixed(4)} | Debt: ${(Number(p.debtAmount) / 1e18).toFixed(4)}`);
+          console.log(
+            `>     #${p.id} ${dir} | Margin: ${(Number(p.marginAmount) / 1e18).toFixed(4)} | Debt: ${(Number(p.debtAmount) / 1e18).toFixed(4)}`,
+          );
         }
       }
       if (lpPositions.length > 0) {
@@ -482,7 +498,9 @@ async function cost(score) {
     console.log(`> 🏦 Smart Account: ${account.address}`);
     console.log(`> 💳 Current ETH Balance: ${(Number(ethBalance) / 1e18).toFixed(6)} ETH`);
     if (deficit > 0n) {
-      console.log(`> ⚠️  ETH Deficit: ${(Number(deficit) / 1e18).toFixed(6)} ETH — please top up your Smart Account before mining with Full Alignment.`);
+      console.log(
+        `> ⚠️  ETH Deficit: ${(Number(deficit) / 1e18).toFixed(6)} ETH — please top up your Smart Account before mining with Full Alignment.`,
+      );
     } else {
       console.log(`> ✅ ETH Balance sufficient for Full Alignment.`);
     }
@@ -620,12 +638,22 @@ async function swap_command(direction, amountStr, slippageStr = "1") {
 
   const amountOutMin = (amountOut * (100n - slippage)) / 100n;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+  const swapCalls = [];
+  let description = ``;
 
   if (!zeroForOne) {
     const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_PAIR_POSITION, amountIn);
     if (approval) {
-      const ok = await runUserOp(account, approval, `Approve AGC for Swap`);
-      if (!ok) return;
+      console.log(`> Approving AGC for Swap...`);
+      description += `Approve AGC for Swap + `;
+      swapCalls.push(approval);
+    }
+    // Also approve Paymaster to spend AGC for sponsorship
+    const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000")); // Approve a large amount
+    if (pmApproval) {
+      console.log(`> Approving AGC for Paymaster sponsorship...`);
+      description += `Approve AGC for Paymaster + `;
+      swapCalls.push(pmApproval);
     }
   }
 
@@ -647,8 +675,9 @@ async function swap_command(direction, amountStr, slippageStr = "1") {
       ],
     }),
   };
-
-  await runUserOp(account, swapCall, `Swap ${direction}`);
+  swapCalls.push(swapCall);
+  description += `Swap ${direction}`;
+  await runUserOp(account, swapCalls, description);
 }
 
 async function lp_add(amountEthStr, slippageStr = "1") {
@@ -682,10 +711,22 @@ async function lp_add(amountEthStr, slippageStr = "1") {
   const amount1Min = (amount1 * (100n - slippage)) / 100n;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
 
+  const lpCalls = [];
+  let description = "";
+
   const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_PAIR_POSITION, amount1);
   if (approval) {
-    const ok = await runUserOp(account, approval, `Approve AGC for LP`);
-    if (!ok) return;
+    console.log(`> Approving AGC for LP...`);
+    lpCalls.push(approval);
+    description += "Approve AGC for LP + ";
+  }
+
+  // Also approve Paymaster to spend AGC for sponsorship
+  const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000"));
+  if (pmApproval) {
+    console.log(`> Approving AGC for Paymaster sponsorship...`);
+    lpCalls.push(pmApproval);
+    description += "Approve AGC for Paymaster + ";
   }
 
   const lpCall = {
@@ -697,8 +738,10 @@ async function lp_add(amountEthStr, slippageStr = "1") {
       args: [POOL_KEY, account.address, amount0, amount1, amount0Min, amount1Min, deadline],
     }),
   };
+  lpCalls.push(lpCall);
+  description += "Add Liquidity";
 
-  await runUserOp(account, lpCall, `Add Liquidity`);
+  await runUserOp(account, lpCalls, description);
 }
 
 async function margin_open(direction, amountStr, leverageStr = "2") {
@@ -714,12 +757,24 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
   const asset = marginForOne ? "AGC" : "ETH";
   console.log(`> 📈 Opening Margin: ${amountStr} ${asset} @ ${leverage}x leverage`);
 
+  const marginCalls = [];
+  let description = "";
+
   if (marginForOne) {
     const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_MARGIN_POSITION, marginAmount);
     if (approval) {
-      const ok = await runUserOp(account, approval, `Approve AGC for Margin`);
-      if (!ok) return;
+      console.log(`> Approving AGC for Margin...`);
+      marginCalls.push(approval);
+      description += "Approve AGC for Margin + ";
     }
+  }
+
+  // Also approve Paymaster to spend AGC for sponsorship
+  const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000"));
+  if (pmApproval) {
+    console.log(`> Approving AGC for Paymaster sponsorship...`);
+    marginCalls.push(pmApproval);
+    description += "Approve AGC for Paymaster + ";
   }
 
   const marginCall = {
@@ -742,8 +797,10 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
       ],
     }),
   };
+  marginCalls.push(marginCall);
+  description += `Open Margin ${direction} ${leverageStr}x`;
 
-  await runUserOp(account, marginCall, `Open Margin ${direction} ${leverageStr}x`);
+  await runUserOp(account, marginCalls, description);
 }
 
 async function lend_open(asset, amountStr) {
@@ -758,12 +815,24 @@ async function lend_open(asset, amountStr) {
   const assetLabel = lendForOne ? "AGC" : "ETH";
   console.log(`> 🏦 Lending: ${amountStr} ${assetLabel}`);
 
+  const lendCalls = [];
+  let description = "";
+
   if (lendForOne) {
     const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_LEND_POSITION, amount);
     if (approval) {
-      const ok = await runUserOp(account, approval, `Approve AGC for Lend`);
-      if (!ok) return;
+      console.log(`> Approving AGC for Lend...`);
+      lendCalls.push(approval);
+      description += "Approve AGC for Lend + ";
     }
+  }
+
+  // Also approve Paymaster to spend AGC for sponsorship
+  const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000"));
+  if (pmApproval) {
+    console.log(`> Approving AGC for Paymaster sponsorship...`);
+    lendCalls.push(pmApproval);
+    description += "Approve AGC for Paymaster + ";
   }
 
   const lendCall = {
@@ -775,8 +844,10 @@ async function lend_open(asset, amountStr) {
       args: [POOL_KEY, lendForOne, account.address, amount, deadline],
     }),
   };
+  lendCalls.push(lendCall);
+  description += `Lend ${asset}`;
 
-  await runUserOp(account, lendCall, `Lend ${asset}`);
+  await runUserOp(account, lendCalls, description);
 }
 
 async function liquidate_position(tokenIdStr) {
@@ -838,7 +909,9 @@ async function scan_liquidations(scanWindowStr = "100") {
   }
 
   if (liquidatable.length > 0) {
-    console.log(`> Found ${liquidatable.length} liquidatable positions: ${liquidatable.map(id => `#${id}`).join(", ")}`);
+    console.log(
+      `> Found ${liquidatable.length} liquidatable positions: ${liquidatable.map((id) => `#${id}`).join(", ")}`,
+    );
   } else {
     console.log(`> No liquidatable positions found.`);
   }
@@ -904,13 +977,17 @@ async function positions() {
   console.log(`> 📈 Margin Positions: ${marginPositions.length}`);
   for (const p of marginPositions) {
     const dir = p.marginForOne ? "Long AGC" : "Long ETH";
-    console.log(`>   #${p.id} | ${dir} | Margin: ${(Number(p.marginAmount) / 1e18).toFixed(6)} | Total: ${(Number(p.marginTotal) / 1e18).toFixed(6)} | Debt: ${(Number(p.debtAmount) / 1e18).toFixed(6)}`);
+    console.log(
+      `>   #${p.id} | ${dir} | Margin: ${(Number(p.marginAmount) / 1e18).toFixed(6)} | Total: ${(Number(p.marginTotal) / 1e18).toFixed(6)} | Debt: ${(Number(p.debtAmount) / 1e18).toFixed(6)}`,
+    );
   }
 
   console.log(`>`);
   console.log(`> 💧 LP Positions: ${lpPositions.length}`);
   for (const p of lpPositions) {
-    console.log(`>   #${p.id} | Liquidity: ${(Number(p.liquidity) / 1e18).toFixed(6)} | Investment: ${(Number(p.totalInvestment) / 1e18).toFixed(6)}`);
+    console.log(
+      `>   #${p.id} | Liquidity: ${(Number(p.liquidity) / 1e18).toFixed(6)} | Investment: ${(Number(p.totalInvestment) / 1e18).toFixed(6)}`,
+    );
   }
 
   console.log(`>`);
@@ -1128,7 +1205,9 @@ async function lend_close(tokenIdStr, amountStr) {
         args: [tokenId],
       });
       withdrawAmount = BigInt(state.lendAmount);
-      console.log(`> 🏦 Withdrawing full amount (${(Number(withdrawAmount) / 1e18).toFixed(6)}) from Lend Position #${tokenIdStr}...`);
+      console.log(
+        `> 🏦 Withdrawing full amount (${(Number(withdrawAmount) / 1e18).toFixed(6)}) from Lend Position #${tokenIdStr}...`,
+      );
     } catch (e) {
       return formatError(`Failed to read lend position #${tokenIdStr}: ${e.message}`);
     }
