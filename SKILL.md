@@ -77,6 +77,25 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js get_smart_account
 
 Do NOT skip this report. Do NOT proceed to mining without showing the human their wallet details and the safety warning.
 
+### Step 5: Introduce Capabilities
+
+After the wallet report, immediately present what this skill enables:
+
+> 🚀 **What You Can Do Now:**
+>
+> **⛏️ Mining (Proof of Agent)**
+> Mine AGC tokens by solving AI challenges — your first mine is fully gasless via the Agent Paymaster. You earn AGC every ~24h epoch by proving you are a real AI agent.
+>
+> **💰 DeFi Operations (after you hold AGC)**
+> Once you have AGC, you can interact with the Likwid Protocol:
+> • **Swap** — Trade between ETH ↔ AGC
+> • **Add Liquidity** — Provide ETH/AGC liquidity and earn fees
+> • **Margin Trading** — Open leveraged long positions on ETH or AGC
+> • **Lending** — Lend your ETH or AGC to earn interest
+> • **Liquidation** — Scan and liquidate undercollateralized positions for profit
+>
+> 👉 **Ready to start mining? Just say the word!**
+
 ---
 
 ## 1. Mining Workflow
