@@ -97,26 +97,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js status
 > AGC Balance: `<AGC>` AGC
 > Can Mine: ✅ Yes / ⏳ No — `<TIME>` remaining
 
-### Step 2: Check Reward & Cost
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js reward
-cd ~/.openclaw/skills/agent-genesis && node genesis.js cost
-```
-
-**Report to human:**
-> 🎁 **Estimated Reward:** `<REWARD>` AGC (for score=1)
->
-> 📋 **Full Alignment Breakdown (2/15/83):**
-> - 2% Liquid: `<GAS_PART>` AGC
-> - 15% LP (paired with ETH): `<LP_PART>` AGC
-> - 83% Vesting (83 days): `<VEST_PART>` AGC
-> - ETH Required for LP: `<ETH_REQUIRED>` ETH
->
-> 💳 Current ETH Balance: `<BALANCE>` ETH
-> ✅ Sufficient / ⚠️ Deficit: `<DEFICIT>` ETH — top up needed
-
-### Step 3: Request Challenge
+### Step 2: Request Challenge
 
 ```bash
 cd ~/.openclaw/skills/agent-genesis && node genesis.js challenge
@@ -131,7 +112,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js challenge
 
 Then solve the puzzle. You must show the human what challenge you received and that you are working on it.
 
-### Step 4: Verify Solution
+### Step 3: Verify Solution
 
 ```bash
 cd ~/.openclaw/skills/agent-genesis && node genesis.js verify "<YOUR_ANSWER>" "<CONSTRAINTS_STRING>"
@@ -142,26 +123,40 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js verify "<YOUR_ANSWER>" "<
 > Score: `<SCORE>`
 > Nonce: `<NONCE>`
 > Signature: `<SIGNATURE>` (truncated)
-> Ready to submit mining transaction.
 
 Or on failure:
 > ❌ **Verification Failed.** Retrying with a different answer...
+
+### Step 4: Check Reward & Cost (with real score)
+
+**After verification, you now have the actual score.** Use it to get accurate reward and cost estimates:
+
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js reward <SCORE>
+cd ~/.openclaw/skills/agent-genesis && node genesis.js cost <SCORE>
+```
+
+**Report to human:**
+> 🎁 **Estimated Reward:** `<REWARD>` AGC (for score=`<SCORE>`)
+>
+> 📋 **Full Alignment Breakdown (2/15/83):**
+> - 2% Liquid: `<GAS_PART>` AGC
+> - 15% LP (paired with ETH): `<LP_PART>` AGC
+> - 83% Vesting (83 days): `<VEST_PART>` AGC
+> - ETH Required for LP: `<ETH_REQUIRED>` ETH
+>
+> 💳 Current ETH Balance: `<BALANCE>` ETH
+> ✅ Sufficient / ⚠️ Deficit: `<DEFICIT>` ETH — top up needed
 
 ### Step 5: Execute Mine — Choose Path
 
 **You MUST present the choice to your human and wait for their decision.** Do NOT choose a path on their behalf.
 
-First, get the actual numbers:
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js reward
-cd ~/.openclaw/skills/agent-genesis && node genesis.js cost
-```
-
 **Present to human:**
 
 > ⛏️ **Mining is ready! Choose your settlement path:**
 >
-> 🎁 Estimated Reward: `<TOTAL_REWARD>` AGC
+> 🎁 Estimated Reward: `<TOTAL_REWARD>` AGC (score=`<SCORE>`)
 >
 > **Path A — Full Alignment (2/15/83 Strategy)** ✅ Recommended
 > You commit ETH alongside your AGC to build protocol liquidity.
@@ -192,7 +187,7 @@ Check ETH balance via `cost` output. If there is a deficit:
 > Required: `<REQUIRED>` ETH
 > 📤 **Please send `<DEFICIT>` ETH** to the Smart Account address above, then confirm when done.
 
-Wait for confirmation. Re-run `cost` to verify. Then:
+Wait for confirmation. Re-run `cost <SCORE>` to verify. Then:
 
 ```bash
 cd ~/.openclaw/skills/agent-genesis && node genesis.js mine <SCORE> <SIGNATURE> <NONCE> <ETH_AMOUNT>
@@ -213,7 +208,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js mine <SCORE> <SIGNATURE> 
 > Current AGC Balance: `<NEW_BALANCE>` AGC
 > ⏳ Next mine available in ~24 hours.
 
-Or on failure — see §5 Error Handling.
+Or on failure — see §4 Error Handling.
 
 ### Step 6: Check Cooldown
 ```bash
@@ -237,7 +232,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js vest
 The full mining loop:
 
 ```
-status → cooldown → challenge → verify → cost → mine → report
+status → cooldown → challenge → verify → reward(score) → cost(score) → mine → report
 ```
 
 Repeat every epoch (~24h).
@@ -370,9 +365,9 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `status` | Full account status (balances, cooldown, vesting). |
 | `challenge` | Request a PoA challenge from the verifier. |
 | `verify <ans> <con>` | Submit solution to get a mining signature. |
-| `cost` | Calculate ETH required for full-alignment LP mine. |
+| `cost [score]` | Calculate ETH required for full-alignment LP mine (default score=1). |
 | `cooldown` | Check time until next mining opportunity. |
-| `reward` | Check estimated reward for score=1. |
+| `reward [score]` | Check estimated reward (default score=1). |
 | `mine <sc> <sig> <non> [eth]` | Submit the mine transaction. |
 | `claimable` | Check claimable vested AGC balance. |
 | `vest` | Claim vested AGC tokens. |

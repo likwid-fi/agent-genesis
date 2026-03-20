@@ -393,17 +393,18 @@ async function verify(answer, constraints) {
   }
 }
 
-async function cost() {
+async function cost(score) {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found. Run create_wallet first.");
   const account = await getSmartAccount(signer);
+  const scoreVal = BigInt(score || 1);
 
   try {
     const estReward = await publicClient.readContract({
       address: AGC_TOKEN_ADDRESS,
       abi: parseAbi(["function getEstimatedReward(uint256) view returns (uint256)"]),
       functionName: "getEstimatedReward",
-      args: [1n],
+      args: [scoreVal],
     });
     const liquidPart = (estReward * 15n) / 100n;
     const gasPart = (estReward * 2n) / 100n;
@@ -422,7 +423,7 @@ async function cost() {
     const ethBalance = await publicClient.getBalance({ address: account.address });
     const deficit = ethCost > ethBalance ? ethCost - ethBalance : 0n;
 
-    console.log(`> 💰 Mining Cost Estimate`);
+    console.log(`> 💰 Mining Cost Estimate (score=${scoreVal})`);
     console.log(`> Total Reward: ${(Number(estReward) / 1e18).toFixed(6)} AGC`);
     console.log(`>`);
     console.log(`> 📋 Full Alignment Breakdown (2/15/83):`);
@@ -465,15 +466,16 @@ async function cooldown() {
   }
 }
 
-async function reward() {
+async function reward(score) {
+  const scoreVal = BigInt(score || 1);
   try {
     const rw = await publicClient.readContract({
       address: AGC_TOKEN_ADDRESS,
       abi: parseAbi(["function getEstimatedReward(uint256) view returns (uint256)"]),
       functionName: "getEstimatedReward",
-      args: [1n],
+      args: [scoreVal],
     });
-    console.log(`> 🎁 Estimated Reward: ${(Number(rw) / 1e18).toFixed(6)} AGC (for score=1)`);
+    console.log(`> 🎁 Estimated Reward: ${(Number(rw) / 1e18).toFixed(6)} AGC (for score=${scoreVal})`);
   } catch (e) {
     formatError(e.message);
   }
@@ -814,7 +816,7 @@ Mining Workflow:
   status                    Full account status (balances, cooldown, vesting).
   challenge                 Request a PoA challenge from the verifier.
   verify <ans> <constraints> Submit solution to get a mining signature.
-  cost                      Calculate ETH required for full-alignment LP mine.
+  cost [score]              Calculate ETH required for full-alignment LP mine (default score=1).
   mine <score> <sig> <nonce> [eth]  Submit the mine transaction.
 
 Vesting:
@@ -823,7 +825,7 @@ Vesting:
 
 Info:
   cooldown                  Check time until next mining opportunity.
-  reward                    Check estimated reward for score=1.
+  reward [score]            Check estimated reward (default score=1).
 
 DeFi Actions:
   swap <dir> <amt>          Swap between ETH and AGC (eth-agc / agc-eth).
@@ -856,13 +858,13 @@ switch (command) {
     verify(args[1], args[2]);
     break;
   case "cost":
-    cost();
+    cost(args[1]);
     break;
   case "cooldown":
     cooldown();
     break;
   case "reward":
-    reward();
+    reward(args[1]);
     break;
   case "mine":
     mine(args[1], args[2], args[3], args[4]);
