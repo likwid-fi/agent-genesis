@@ -1,7 +1,7 @@
-# 1. 忽略所有文件
+# Ignore all files
 *
 
-# 2. 不忽略(即保留)特定文件/目录
+# Do not ignore (i.e. retain) specific files/directories
 !SKILL.md
 !package.json
 !README.md
@@ -9,5 +9,5 @@
 !bootstrap.sh
 !contracts/src/AgentGenesisCoin.sol
 !contracts/src/AgentPaymaster.sol
-# 忽略不需要的特殊情况
+# Ignore unnecessary special cases
 !*/
