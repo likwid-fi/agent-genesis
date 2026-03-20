@@ -97,7 +97,7 @@ contract AgentPaymaster is BasePaymaster {
     {
         // Mode 0: mine() is permanently FREE
         if (_isFreeMine(userOp.callData)) {
-            context = abi.encode(uint8(0), userOp.sender, uint256(0));
+            context = abi.encode(uint8(0), userOp.sender, uint256(0), uint256(0));
             return (context, 0); // 0 means signature validation success (we don't need additional paymaster sigs here)
         }
 
@@ -109,11 +109,12 @@ contract AgentPaymaster is BasePaymaster {
 
         // Calculate maxCost in AGC (currency1, so zeroForOne = false)
         (uint256 amountIn,,) = SwapMath.getAmountIn(pairReserves, truncatedReserves, POOL_FEE, false, maxCost);
+        amountIn = amountIn * 110 / 100; // Add 10% slippage tolerance
 
         // Deduct AGC tokens from sender
         AGC_TOKEN.safeTransferFrom(userOp.sender, address(this), amountIn);
 
-        context = abi.encode(uint8(1), userOp.sender, amountIn);
+        context = abi.encode(uint8(1), userOp.sender, amountIn, maxCost);
         return (context, 0);
     }
 
@@ -126,7 +127,8 @@ contract AgentPaymaster is BasePaymaster {
         internal
         override
     {
-        (uint8 paymasterMode, address sender, uint256 amountIn) = abi.decode(context, (uint8, address, uint256));
+        (uint8 paymasterMode, address sender, uint256 amountIn, uint256 maxCost) =
+            abi.decode(context, (uint8, address, uint256, uint256));
 
         // If it's a Likwid protocol call (Mode 1), charge the AGC
         if (paymasterMode == 1) {
@@ -136,6 +138,10 @@ contract AgentPaymaster is BasePaymaster {
             // Add estimated overhead cost for the postOp swap and subsequent operations
             uint256 overheadCost = POST_OP_GAS * tx.gasprice;
             uint256 totalCostToRecover = actualGasCost + overheadCost;
+
+            if (totalCostToRecover > maxCost) {
+                totalCostToRecover = maxCost;
+            }
 
             // Swap AGC to get exactly actualGasCost of ETH
             IPairPositionManager.SwapOutputParams memory params = IPairPositionManager.SwapOutputParams({
@@ -148,14 +154,26 @@ contract AgentPaymaster is BasePaymaster {
             });
 
             // This swap will trigger receive() and deposit ETH to EntryPoint automatically
-            (,, uint256 amountInUsed) = POSITION_MANAGER.exactOutput(params);
+            try POSITION_MANAGER.exactOutput(params) returns (uint24, uint256, uint256 amountInUsed) {
+                // Clear remaining allowance
+                AGC_TOKEN.forceApprove(address(POSITION_MANAGER), 0);
 
-            // Clear remaining allowance
-            AGC_TOKEN.forceApprove(address(POSITION_MANAGER), 0);
+                // Refund the unused AGC back to the sender
+                if (amountIn > amountInUsed) {
+                    AGC_TOKEN.safeTransfer(sender, amountIn - amountInUsed);
+                }
+            } catch {
+                IPairPositionManager.SwapInputParams memory inputParams = IPairPositionManager.SwapInputParams({
+                    poolId: POOL_ID,
+                    zeroForOne: false,
+                    to: address(this),
+                    amountIn: amountIn,
+                    amountOutMin: 0,
+                    deadline: block.timestamp + 30
+                });
+                try POSITION_MANAGER.exactInput(inputParams) {} catch {}
 
-            // Refund the unused AGC back to the sender
-            if (amountIn > amountInUsed) {
-                AGC_TOKEN.safeTransfer(sender, amountIn - amountInUsed);
+                AGC_TOKEN.forceApprove(address(POSITION_MANAGER), 0);
             }
         }
         // If Mode 0 (Free mine), do nothing, we eat the ETH cost.
