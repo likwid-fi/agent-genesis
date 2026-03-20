@@ -24,10 +24,12 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     error NonceAlreadyUsed();
     error InvalidSignature();
     error ETHRefundFailed();
+    error PaymasterAlreadyLocked();
 
     // --- Config ---
     address public mineSigner; // Likwid Oracle address for signing compute score mines
     address public paymaster; // AgentPaymaster address to allow auto-approvals
+    bool public paymasterLocked; // Once locked, paymaster cannot be changed
     address public immutable LIKWID_POSITION_MANAGER;
 
     uint256 public constant MAX_SUPPLY = 21_000_000_000 ether;
@@ -111,9 +113,12 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
     // --- Admin ---
     function setPaymaster(address _paymaster) external onlyOwner {
+        if (paymasterLocked) revert PaymasterAlreadyLocked();
         if (_paymaster == address(0)) revert InvalidPaymasterAddress();
+        address oldPaymaster = paymaster;
         paymaster = _paymaster;
-        emit PaymasterUpdated(paymaster, _paymaster);
+        paymasterLocked = true;
+        emit PaymasterUpdated(oldPaymaster, _paymaster);
     }
 
     function setMineSigner(address _signer) external onlyOwner {
