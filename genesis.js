@@ -166,9 +166,8 @@ async function runUserOp(account, calls, description) {
 
   console.log(`> Packaging UserOperation for ${description}...`);
   try {
-    const callData = Array.isArray(calls) ? await account.encodeCallData(calls) : await account.encodeCallData([calls]);
     const userOpHash = await smartAccountClient.sendUserOperation({
-      userOperation: { callData },
+      userOperation: { callData: await account.encodeCallData(calls) },
     });
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
