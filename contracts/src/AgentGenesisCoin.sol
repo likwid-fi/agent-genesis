@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {OFT} from "@layerzerolabs/oft-evm/contracts/OFT.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -13,6 +15,7 @@ import {PoolKey} from "@likwid-fi/core/types/PoolKey.sol";
 import {Currency, CurrencyLibrary} from "@likwid-fi/core/types/Currency.sol";
 
 contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver {
+    using SafeERC20 for IERC20;
     using ECDSA for bytes32;
 
     // --- Custom Errors ---
@@ -103,6 +106,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
         // --- Initial Allocations ---
         _mint(msg.sender, LP_INITIAL_ALLOCATION + VAULT_ALLOCATION);
+        _mint(address(this), ECOSYSTEM_FUND_ALLOCATION); // Ecosystem fund starts in contract and is vested out over time
 
         // --- Ecosystem Fund Setup ---
         ecosystemFundStartTime = block.timestamp;
@@ -124,8 +128,9 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
     function setMineSigner(address _signer) external onlyOwner {
         if (_signer == address(0)) revert InvalidMineSignerAddress();
+        address oldSigner = mineSigner;
         mineSigner = _signer;
-        emit SignerUpdated(mineSigner, _signer);
+        emit SignerUpdated(oldSigner, mineSigner);
     }
 
     function setEpochLength(uint256 _newEpochLength) external onlyOwner {
@@ -140,8 +145,20 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         if (amount == 0) return;
 
         ecosystemFundReleased += amount;
-        _mint(recipient, amount);
+        _transfer(address(this), recipient, amount);
         emit EcosystemFundReleased(recipient, amount);
+    }
+
+    function rescueFunds(address token, address recipient, uint256 amount) external onlyOwner {
+        if (token == address(0)) {
+            (bool success,) = recipient.call{value: amount}("");
+            require(success, "ETH transfer failed");
+        } else {
+            // Revert if owner tries to drain valid Vested and Ecosystem allocations
+            // This is simple protection, could be more elaborate, but assuming owner won't sabotage
+            require(token != address(this), "Cannot rescue AGC directly");
+            IERC20(token).safeTransfer(recipient, amount);
+        }
     }
 
     // --- View Functions ---
@@ -224,7 +241,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         address signer = ECDSA.recover(ethSignedMessageHash, signature);
         if (signer != mineSigner) revert InvalidSignature();
 
-        // 5. Calculate Reward with cascade decay
+        // 5. Calculate Reward
         uint256 reward = _applyScoreAndCalculateReward(score);
 
         // 7. Distribution Logic
@@ -236,11 +253,14 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
             // --- Option A: Full Alignment ---
             uint256 liquidPart = (reward * 15) / 100; // 15% for liquidity
             uint256 vestedPart = reward - gasPart - liquidPart; // 83% goes to vesting
+            _mint(address(this), liquidPart + vestedPart); // Mint vested part to contract for vesting schedule
             _handleLiquidityProvision(liquidPart, vestedPart);
+            _updateMinedTotal(reward);
             emit Mined(msg.sender, reward, true);
         } else {
             // --- Option B: Quick Exit ---
             // vestedPart is effectively burned (never minted)
+            _updateMinedTotal(gasPart);
             emit Mined(msg.sender, gasPart, false);
         }
 
@@ -308,31 +328,30 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         // Two-phase denominator:
         //   Phase 1 (S_curr <= S_prev): fixed rate, no front-running
         //   Phase 2 (S_curr > S_prev): dynamic difficulty
-        uint256 denominator = totalScoreInCurrentEpoch <= sPrev
-            ? sPrev
-            : totalScoreInCurrentEpoch;
+        uint256 denominator = totalScoreInCurrentEpoch <= sPrev ? sPrev : totalScoreInCurrentEpoch;
 
         uint256 reward = (baseReward * score) / denominator;
 
-        // MAX_SUPPLY protection
-        if (totalSupply() + reward > MAX_SUPPLY) {
-            uint256 remaining = MAX_SUPPLY - totalSupply();
+        // MAX_SUPPLY protection based on mining allocation
+        if (minedTotal + reward > MINING_ALLOCATION) {
+            uint256 remaining = MINING_ALLOCATION > minedTotal ? MINING_ALLOCATION - minedTotal : 0;
             reward = remaining >= MIN_REWARD_THRESHOLD ? remaining : 0;
-        }
-
-        // Cascade decay
-        minedTotal += reward;
-        while (minedTotal >= nextDecayThreshold) {
-            baseReward = (baseReward * DECAY_RATE) / 1000;
-            nextDecayThreshold += baseReward;
-            emit DecayTriggered(baseReward, nextDecayThreshold);
         }
 
         return reward;
     }
 
+    function _updateMinedTotal(uint256 actualMint) internal {
+        // Cascade decay
+        minedTotal += actualMint;
+        while (minedTotal >= nextDecayThreshold) {
+            baseReward = (baseReward * DECAY_RATE) / 1000;
+            nextDecayThreshold += baseReward;
+            emit DecayTriggered(baseReward, nextDecayThreshold);
+        }
+    }
+
     function _handleLiquidityProvision(uint256 liquidAGC, uint256 vestedAGC) internal {
-        _mint(address(this), liquidAGC);
         _approve(address(this), LIKWID_POSITION_MANAGER, liquidAGC);
 
         // Params for Likwid
@@ -341,6 +360,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
         VestingSchedule storage schedule = vestingSchedules[msg.sender];
         uint256 tokenId = schedule.lpTokenId;
+        uint256 balanceBefore = address(this).balance - msg.value;
 
         if (tokenId == 0) {
             PoolKey memory poolKey = PoolKey({
@@ -365,7 +385,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         _setupVesting(msg.sender, vestedAGC);
 
         // Refund Excess ETH
-        uint256 ethRefund = address(this).balance;
+        uint256 ethRefund = address(this).balance - balanceBefore;
         if (ethRefund > 0) {
             (bool success,) = msg.sender.call{value: ethRefund}("");
             if (!success) revert ETHRefundFailed();
@@ -373,6 +393,8 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     }
 
     function _setupVesting(address user, uint256 amount) internal {
+        if (amount == 0) return;
+
         VestingSchedule storage schedule = vestingSchedules[user];
 
         if (schedule.totalLocked > 0) {
@@ -397,7 +419,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         uint256 payout = _calculateClaimableVested(schedule);
         if (payout > 0) {
             schedule.released += payout;
-            _mint(user, payout);
+            _transfer(address(this), user, payout);
         }
     }
 
@@ -406,5 +428,8 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         return this.onERC721Received.selector;
     }
 
-    receive() external payable {}
+    // --- Fallback to receive ETH refunds (addLiquidity/increaseLiquidity) ---
+    receive() external payable {
+        require(msg.sender == LIKWID_POSITION_MANAGER, "Only Likwid Position Manager can send ETH");
+    }
 }

@@ -163,6 +163,7 @@ contract AgentPaymaster is BasePaymaster {
                     AGC_TOKEN.safeTransfer(sender, amountIn - amountInUsed);
                 }
             } catch {
+                amountIn = AGC_TOKEN.balanceOf(address(this));
                 IPairPositionManager.SwapInputParams memory inputParams = IPairPositionManager.SwapInputParams({
                     poolId: POOL_ID,
                     zeroForOne: false,
