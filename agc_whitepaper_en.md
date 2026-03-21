@@ -54,93 +54,111 @@ ERC-8004 Billing Authentication addresses a core challenge: **How can an Agent p
 
 #### The Challenge
 
-Taking OpenRouter as an example, an Agent queries its billing via `GET /api/v1/credits`:
+Taking OpenRouter as an example, the commonly used `GET /api/v1/credits` endpoint returns a response that contains no unique identifier bound to the API Key, making it unsuitable for double-spend prevention.
+
+However, OpenRouter provides another critical endpoint `GET /api/v1/key`, whose response body contains all the information needed for anti-double-spending:
 
 ```
-Request: GET https://openrouter.ai/api/v1/credits
+Request: GET https://openrouter.ai/api/v1/key
 Header: Authorization: Bearer sk-or-v1-74bb... (API Key)
 
-Response: {"data":{"total_credits":20,"total_usage":10}}
+Response:
+{
+  "data": {
+    "label": "sk-or-v1-74b...85e",        ← Unique identifier, mapped 1:1 to the API Key
+    "usage": 0.29338664,                    ← Cumulative spend for this Key (USD)
+    "usage_daily": 0.29338664,
+    "usage_weekly": 0.29338664,
+    "usage_monthly": 0.29338664,
+    "is_free_tier": false,
+    ...
+  }
+}
 ```
 
-This response presents three problems:
-1. **No unique identifier** — The response contains no unique ID bound to the API Key;
-2. **No server signature** — The response body carries no cryptographic signature; anyone can fabricate a JSON;
-3. **No replay protection** — The same response can be submitted repeatedly.
+Key characteristics of this response:
+1. **`label` is a unique identifier** — Each API Key has a unique `label` composed of the Key's prefix and suffix, mapped one-to-one with the Key;
+2. **`usage` is per-key consumption** — Precise cumulative spend for the individual Key, not an account-level aggregate;
+3. **Both `label` and `usage` are in the response body** — This means zkTLS middleware can extract both fields directly from the response without needing access to the API Key in the request header.
 
-Traditional approaches either require the Agent to hand over its API Key to the verifier (privacy breach) or depend on API providers adding signing endpoints (uncontrollable).
+#### Solution: zkTLS + Reclaim Protocol
 
-#### Solution: zkTLS (TLS Notary)
+**zkTLS leverages the cryptographic guarantees inherent to the TLS protocol to prove the authenticity of HTTP responses.** Its core principle: the server certificate and session keys within the TLS handshake prove that data genuinely originates from the target server. zkTLS introduces a neutral **Attestor node** into the TLS session process, enabling it to witness and sign the response content's authenticity while **being unable to access the request plaintext** (i.e., it cannot see the API Key).
 
-**zkTLS is the only technical path that simultaneously satisfies the triple constraints of "no key disclosure, unforgeability, and non-replayability."**
-
-Its core principle leverages the cryptographic guarantees inherent to the TLS protocol itself: the server certificate and session keys within the TLS handshake prove that data genuinely originates from the target server. zkTLS introduces a neutral **Notary node** into the TLS key negotiation process, enabling it to attest to the authenticity of the response while **being unable to access the request plaintext** (i.e., it cannot see the API Key).
+The protocol adopts **Reclaim Protocol** as the zkTLS middleware. Reclaim's Attestor architecture can extract specified fields from the response body and generate signed attestations without touching sensitive information in request headers.
 
 #### Complete Verification Flow
 
 ```
-Agent                    TLS Notary               OpenRouter
+Agent                    Reclaim Attestor         OpenRouter
   │                         │                         │
-  │── Three-party TLS ────→│←───────────────────────→│
-  │  handshake              │                         │
-  │  (Notary participates   │                         │
-  │   in key negotiation,   │                         │
-  │   gains verification    │                         │
-  │   but not decryption)   │                         │
+  │── Initiate Reclaim ───→│                         │
+  │  session (Provider:     │                         │
+  │  openrouter-key-info)   │                         │
   │                         │                         │
-  │── GET /credits ────────→│──────── Forward ───────→│
-  │  (with Authorization)   │ (Notary cannot read     │
-  │                         │  plaintext)             │
+  │── GET /api/v1/key ─────→│──────── Proxy Forward ─→│
+  │  (with Authorization)   │ (Attestor cannot read   │
+  │                         │  request headers)       │
   │                         │                         │
   │←── Response ────────────│←─────── Response ──────│
-  │  {total_usage: 10}      │ (Notary can verify      │
-  │                         │  TLS signature)         │
+  │  {label, usage, ...}    │                         │
   │                         │                         │
-  │── Generate ZK Proof ───→│                         │
+  │                    Attestor extracts from         │
+  │                    response body:                 │
+  │                    - label (unique identifier)    │
+  │                    - usage (spend amount)         │
+  │                    and generates signed           │
+  │                    attestation                    │
+  │                         │                         │
+  │←── Return Attestation ──│                         │
+  │  (with Attestor sig)    │                         │
 ```
 
-The Agent locally generates a **Zero-Knowledge Proof (ZK Proof)** that publicly outputs the following fields while keeping the API Key as a private input:
+The Reclaim Attestation publicly outputs the following fields:
 
 | Field | Public? | Purpose |
 |:---|:---:|:---|
 | `domain` | ✅ Public | Proves data genuinely originates from `openrouter.ai` |
-| `path` | ✅ Public | Proves the `/api/v1/credits` endpoint was called |
-| `total_usage` | ✅ Public | Used to calculate the TFA compute score |
-| `keyHash = keccak256(apiKey)` | ✅ Public | Unique fingerprint of the API Key for double-spend prevention |
+| `path` | ✅ Public | Proves the `/api/v1/key` endpoint was called |
+| `label` | ✅ Public | Unique identifier for the API Key, used for double-spend prevention |
+| `usage` | ✅ Public | Cumulative spend for this Key, used to calculate the TFA compute score |
 | `agentAddress` | ✅ Public | Binds the proof to a specific Agent address |
-| `apiKey` | ❌ Private | Privacy-protected; used internally within the ZK circuit but never exposed |
+| `apiKey` | ❌ Private | In the request header; Attestor cannot read it |
 
-**Critical security guarantee**: `keyHash` is not externally supplied by the Agent. Instead, the ZK circuit extracts the API Key from the `Authorization` header of the real HTTP session verified by the TLS Notary, then computes `keccak256` internally within the circuit. Any tampering causes proof verification to fail.
+**Critical security guarantee**: `label` and `usage` are extracted by the Reclaim Attestor directly from the TLS-verified authentic HTTP response and endorsed by the Attestor's signature. The Agent cannot tamper with either value — any inconsistency causes attestation signature verification to fail.
 
 #### On-Chain Verification & Double-Spend Prevention
 
 ```solidity
-mapping(bytes32 => uint256) public lastReportedUsage;  // keyHash → last submitted total_usage
-mapping(bytes32 => address) public keyHashOwner;        // keyHash → bound Agent address
+mapping(bytes32 => uint256) public lastReportedUsage;  // labelHash → last submitted usage
+mapping(bytes32 => address) public labelOwner;          // labelHash → bound Agent address
 
 function submitBillingProof(
-    bytes calldata zkProof,
-    uint256 totalUsage,
-    bytes32 keyHash,
+    bytes calldata attestation,     // Reclaim Attestor-signed attestation
+    string calldata label,          // Unique identifier for the API Key
+    uint256 usage,                  // Cumulative spend for this Key (in smallest unit)
     address agent
 ) external {
-    // 1. Verify zkTLS proof (confirm data originates from a real TLS session)
-    require(verifyZkTlsProof(zkProof, totalUsage, keyHash, agent), "Invalid proof");
+    // 1. Verify Reclaim attestation (confirm data from real TLS session + Attestor signature)
+    require(verifyReclaimAttestation(attestation, label, usage, agent), "Invalid attestation");
 
-    // 2. Binding check: one API Key can only bind to one Agent
-    if (keyHashOwner[keyHash] == address(0)) {
-        keyHashOwner[keyHash] = agent;  // First-time binding
+    // 2. Compute on-chain fingerprint for the label
+    bytes32 labelHash = keccak256(abi.encodePacked(label));
+
+    // 3. Binding check: one label can only bind to one Agent
+    if (labelOwner[labelHash] == address(0)) {
+        labelOwner[labelHash] = agent;  // First-time binding
     } else {
-        require(keyHashOwner[keyHash] == agent, "Key bound to another agent");
+        require(labelOwner[labelHash] == agent, "Key bound to another agent");
     }
 
-    // 3. Incremental verification: total_usage must strictly increase
-    uint256 lastUsage = lastReportedUsage[keyHash];
-    require(totalUsage > lastUsage, "No new usage");
+    // 4. Incremental verification: usage must strictly increase
+    uint256 lastUsage = lastReportedUsage[labelHash];
+    require(usage > lastUsage, "No new usage");
 
-    // 4. Calculate increment and map to TFA score
-    uint256 increment = totalUsage - lastUsage;
-    lastReportedUsage[keyHash] = totalUsage;
+    // 5. Calculate increment and map to TFA score
+    uint256 increment = usage - lastUsage;
+    lastReportedUsage[labelHash] = usage;
 
     uint256 score = _usageToScore(increment);
     // → Use score for PoA mining
@@ -149,31 +167,36 @@ function submitBillingProof(
 
 #### Double-Spend Prevention Mechanism
 
-- **`keyHash = keccak256(apiKey)`** serves as the API Key's unique on-chain fingerprint: the same Key always produces the same Hash, but the Key cannot be reverse-engineered from the Hash.
-- **Agent address binding on first submission**: Only that Agent can subsequently submit proofs using this keyHash.
-- **Strictly increasing `total_usage`**: Each submission must exceed the previously recorded value; only the incremental portion is scored. The same billing data cannot be reused.
+- **`label`** is the unique identifier assigned by OpenRouter for each API Key, composed of the Key's prefix and suffix (e.g., `sk-or-v1-74b...85e`), mapped one-to-one with the Key.
+- **`labelHash = keccak256(label)`** serves as the on-chain fingerprint: the same Key's label is always identical, thus the Hash is always identical.
+- **Agent address binding on first submission**: Only that Agent can subsequently submit proofs using this labelHash.
+- **Strictly increasing `usage`**: Each submission must exceed the previously recorded value; only the incremental portion is scored. The same billing data cannot be reused.
 
 #### Attack Analysis
 
 | Attack Vector | Feasible? | Reason |
 |:---|:---:|:---|
-| Fabricate `total_usage` | ❌ | ZK circuit extracts from the real TLS response verified by the Notary; cannot be tampered with |
-| Fabricate `keyHash` | ❌ | ZK circuit internally extracts the Key from the Authorization header and computes the Hash; no external input accepted |
-| Use a fake API Key | ❌ | OpenRouter returns a 401 error; no valid response available to generate a proof |
-| Forge TLS response | ❌ | Notary participated in the TLS handshake, verifying the server certificate chain and session integrity |
-| Submit same billing twice | ❌ | Strictly increasing `total_usage` check + keyHash binding |
-| Use someone else's API Key | ❌ | Must actually possess the Key to initiate the TLS session |
-| Replay old proof | ❌ | `lastReportedUsage` requires `totalUsage` strictly greater than the last record |
+| Fabricate `usage` amount | ❌ | Reclaim Attestor extracts from the TLS-verified real response; Attestor signature guarantees tamper-proof |
+| Fabricate `label` | ❌ | Same as above — `label` is extracted by the Attestor from the response body and signed; cannot be replaced |
+| Use a fake API Key | ❌ | OpenRouter returns a 401 error; no valid response available to generate an attestation |
+| Forge TLS response | ❌ | Attestor participated in the TLS session, verifying the server certificate chain and session integrity |
+| Submit same billing twice | ❌ | Strictly increasing `usage` check + labelHash binding |
+| Use someone else's API Key | ❌ | Must actually possess the Key to initiate the TLS session and obtain a valid response |
+| Replay old proof | ❌ | `lastReportedUsage` requires `usage` strictly greater than the last record |
+| Register one Key to multiple Agents | ❌ | `labelOwner` locks on first binding; the same label can only belong to one Agent |
 
 #### Middleware Integration: Reclaim Protocol
 
-The protocol plans to adopt **Reclaim Protocol** as the zkTLS middleware infrastructure:
+The protocol adopts **Reclaim Protocol** as the zkTLS middleware infrastructure:
 
-- Reclaim provides a production-ready SDK supporting custom HTTPS Providers (e.g., OpenRouter, OpenAI, etc.);
-- The Agent locally initiates a Notary-enabled TLS session via the Reclaim SDK, generating a standardized ZK proof;
-- The proof can be submitted directly to on-chain contracts for verification, requiring no trust in any centralized server.
+- Reclaim provides a production-ready SDK supporting custom HTTPS Providers;
+- A dedicated Provider is configured for OpenRouter, specifying extraction of the `label` and `usage` fields from the `/api/v1/key` response;
+- The Agent locally initiates an Attestor-enabled TLS session via the Reclaim SDK; the Attestor witnesses the response content and generates a signed attestation;
+- The attestation can be submitted to on-chain contracts for verification, or to the centralized Verifier (during Phase 1).
 
-Through zkTLS, ERC-8004 Billing Authentication achieves a **triple security guarantee**: the Agent's API Key never leaves the local device, billing data is rendered unforgeable by the cryptographic guarantees of the TLS protocol, and the on-chain keyHash binding combined with incremental verification completely eliminates the possibility of double-spending.
+**Extensibility**: The same architecture applies to any LLM provider — simply configure a corresponding Reclaim Provider for each provider (specifying the API endpoint and the unique identifier + consumption fields in the response).
+
+Through zkTLS + Reclaim Protocol, ERC-8004 Billing Authentication achieves a **triple security guarantee**: the Agent's API Key never leaves the local device (the Attestor can only see the response body, not the Key in the request header), billing data is rendered unforgeable by the dual guarantees of the TLS protocol and Attestor signature, and the on-chain `label` binding combined with incremental verification completely eliminates the possibility of double-spending.
 
 ---
 

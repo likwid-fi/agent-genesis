@@ -54,88 +54,109 @@ ERC-8004 账单算力认证旨在解决一个核心问题：**如何在不泄露
 
 #### 问题挑战
 
-以 OpenRouter 为例，Agent 通过 `GET /api/v1/credits` 接口查询其账单：
+以 OpenRouter 为例，常见的账单查询接口 `GET /api/v1/credits` 返回的响应不包含任何与 API Key 绑定的唯一标识符，无法用于防双花。
+
+然而，OpenRouter 提供了另一个关键接口 `GET /api/v1/key`，其响应体中包含完整的防双花所需信息：
 
 ```
-请求：GET https://openrouter.ai/api/v1/credits
+请求：GET https://openrouter.ai/api/v1/key
 Header：Authorization: Bearer sk-or-v1-74bb...（API Key）
 
-响应：{"data":{"total_credits":20,"total_usage":10}}
+响应：
+{
+  "data": {
+    "label": "sk-or-v1-74b...85e",        ← 唯一标识符，与 API Key 一一映射
+    "usage": 0.29338664,                    ← 该 Key 的累计消费（USD）
+    "usage_daily": 0.29338664,
+    "usage_weekly": 0.29338664,
+    "usage_monthly": 0.29338664,
+    "is_free_tier": false,
+    ...
+  }
+}
 ```
 
-该响应存在三个问题：
-1. **无唯一标识符** — 响应中没有与 API Key 绑定的唯一 ID；
-2. **无服务器签名** — 响应体本身没有密码学签名，任何人都可以伪造一个 JSON；
-3. **无防重放机制** — 同一份响应可以被反复提交。
+该响应的关键特征：
+1. **`label` 是唯一标识符** — 每个 API Key 拥有唯一的 `label`，由 Key 的前缀和后缀组成，与 Key 一一映射；
+2. **`usage` 是 per-key 消费** — 精确到单个 Key 的累计消费金额，而非账户级别的聚合值；
+3. **`label` 和 `usage` 都在响应体中** — 这意味着 zkTLS 中间件可以直接从响应中提取这两个字段，无需访问请求头中的 API Key。
 
-传统方案要么要求 Agent 将 API Key 交给验证者（泄露隐私），要么依赖 API 提供商增加签名接口（不可控）。
+#### 解决方案：zkTLS + Reclaim Protocol
 
-#### 解决方案：zkTLS（TLS Notary）
+**zkTLS 利用 TLS 协议本身的密码学保证来证明 HTTP 响应的真实性。** 其核心原理是：TLS 握手中的服务器证书和会话密钥证明了数据确实来自目标服务器。zkTLS 引入一个中立的 **Attestor（公证节点）** 参与 TLS 会话过程，使其能够见证并签名响应内容的真实性，同时**无法获取请求明文**（即看不到 API Key）。
 
-**zkTLS 是唯一能同时满足"不泄露密钥、不可伪造、不可双花"三重约束的技术路线。**
-
-其核心原理是利用 TLS 协议本身的密码学保证：TLS 握手中的服务器证书和会话密钥证明了数据确实来自目标服务器。zkTLS 引入一个中立的 **Notary（公证节点）** 参与 TLS 密钥协商过程，使其能够证明响应的真实性，但**无法获取请求明文**（即看不到 API Key）。
+协议采用 **Reclaim Protocol** 作为 zkTLS 中间件。Reclaim 的 Attestor 架构能够从响应体中提取指定字段并生成带签名的 attestation，而不接触请求头中的敏感信息。
 
 #### 完整验证流程
 
 ```
-Agent                    TLS Notary               OpenRouter
+Agent                    Reclaim Attestor         OpenRouter
   │                         │                         │
-  │── 三方 TLS 握手 ──────→│←───────────────────────→│
-  │  (Notary 参与密钥协商，                            │
-  │   获得验证能力但不获得解密能力)                      │
+  │── 发起 Reclaim 会话 ──→│                         │
+  │  (指定 Provider:        │                         │
+  │   openrouter-key-info)  │                         │
   │                         │                         │
-  │── GET /credits ────────→│──────── 转发 ──────────→│
-  │  (携带 Authorization)   │ (Notary 无法读取明文)    │
+  │── GET /api/v1/key ─────→│──────── 代理转发 ──────→│
+  │  (携带 Authorization)   │ (Attestor 无法读取      │
+  │                         │  请求头明文)             │
   │                         │                         │
   │←── 响应 ────────────────│←─────── 响应 ──────────│
-  │  {total_usage: 10}      │ (Notary 可验证 TLS 签名) │
+  │  {label, usage, ...}    │                         │
   │                         │                         │
-  │── 生成 ZK Proof ───────→│                         │
+  │                    Attestor 从响应体提取:          │
+  │                    - label (唯一标识符)            │
+  │                    - usage (消费金额)              │
+  │                    并生成签名 attestation          │
+  │                         │                         │
+  │←── 返回 Attestation ────│                         │
+  │  (含 Attestor 签名)     │                         │
 ```
 
-Agent 在本地生成一份**零知识证明（ZK Proof）**，该证明公开输出以下字段，同时将 API Key 作为隐私输入隐藏：
+Reclaim Attestation 公开输出以下字段：
 
 | 字段 | 是否公开 | 用途 |
 |:---|:---:|:---|
 | `domain` | ✅ 公开 | 证明数据确实来自 `openrouter.ai` |
-| `path` | ✅ 公开 | 证明调用的是 `/api/v1/credits` 接口 |
-| `total_usage` | ✅ 公开 | 用于计算 TFA 算力得分 |
-| `keyHash = keccak256(apiKey)` | ✅ 公开 | API Key 的唯一指纹，用于防双花 |
+| `path` | ✅ 公开 | 证明调用的是 `/api/v1/key` 接口 |
+| `label` | ✅ 公开 | API Key 的唯一标识符，用于防双花 |
+| `usage` | ✅ 公开 | 该 Key 的累计消费金额，用于计算 TFA 算力得分 |
 | `agentAddress` | ✅ 公开 | 将证明绑定到特定 Agent 地址 |
-| `apiKey` | ❌ 隐藏 | 隐私保护，ZK 电路内部使用但不暴露 |
+| `apiKey` | ❌ 隐藏 | 在请求头中，Attestor 无法读取 |
 
-**关键安全保证**：`keyHash` 不是由 Agent 外部传入的，而是 ZK 电路从经过 TLS Notary 验证的真实 HTTP 会话中提取 `Authorization` 头部的 API Key 后，在电路内部执行 `keccak256` 计算得出。任何篡改都会导致证明验证失败。
+**关键安全保证**：`label` 和 `usage` 由 Reclaim Attestor 从经 TLS 验证的真实 HTTP 响应中直接提取，并由 Attestor 签名背书。Agent 无法篡改这两个值——任何不一致都会导致 Attestor 签名验证失败。
 
 #### 链上验证与防双花
 
 ```solidity
-mapping(bytes32 => uint256) public lastReportedUsage;  // keyHash → 上次提交的 total_usage
-mapping(bytes32 => address) public keyHashOwner;        // keyHash → 绑定的 Agent 地址
+mapping(bytes32 => uint256) public lastReportedUsage;  // labelHash → 上次提交的 usage
+mapping(bytes32 => address) public labelOwner;          // labelHash → 绑定的 Agent 地址
 
 function submitBillingProof(
-    bytes calldata zkProof,
-    uint256 totalUsage,
-    bytes32 keyHash,
+    bytes calldata attestation,     // Reclaim Attestor 签名的 attestation
+    string calldata label,          // API Key 的唯一标识符
+    uint256 usage,                  // 该 Key 的累计消费（以最小单位表示）
     address agent
 ) external {
-    // 1. 验证 zkTLS 证明（确认数据来自真实的 TLS 会话）
-    require(verifyZkTlsProof(zkProof, totalUsage, keyHash, agent), "Invalid proof");
+    // 1. 验证 Reclaim attestation（确认数据来自真实的 TLS 会话 + Attestor 签名）
+    require(verifyReclaimAttestation(attestation, label, usage, agent), "Invalid attestation");
 
-    // 2. 绑定检查：一个 API Key 只能绑定一个 Agent
-    if (keyHashOwner[keyHash] == address(0)) {
-        keyHashOwner[keyHash] = agent;  // 首次绑定
+    // 2. 计算 label 的链上指纹
+    bytes32 labelHash = keccak256(abi.encodePacked(label));
+
+    // 3. 绑定检查：一个 label 只能绑定一个 Agent
+    if (labelOwner[labelHash] == address(0)) {
+        labelOwner[labelHash] = agent;  // 首次绑定
     } else {
-        require(keyHashOwner[keyHash] == agent, "Key bound to another agent");
+        require(labelOwner[labelHash] == agent, "Key bound to another agent");
     }
 
-    // 3. 增量验证：total_usage 必须严格递增
-    uint256 lastUsage = lastReportedUsage[keyHash];
-    require(totalUsage > lastUsage, "No new usage");
+    // 4. 增量验证：usage 必须严格递增
+    uint256 lastUsage = lastReportedUsage[labelHash];
+    require(usage > lastUsage, "No new usage");
 
-    // 4. 计算增量并映射为 TFA 得分
-    uint256 increment = totalUsage - lastUsage;
-    lastReportedUsage[keyHash] = totalUsage;
+    // 5. 计算增量并映射为 TFA 得分
+    uint256 increment = usage - lastUsage;
+    lastReportedUsage[labelHash] = usage;
 
     uint256 score = _usageToScore(increment);
     // → 将 score 用于 PoA 挖矿
@@ -144,31 +165,36 @@ function submitBillingProof(
 
 #### 防双花机制
 
-- **`keyHash = keccak256(apiKey)`** 作为 API Key 的唯一链上指纹：同一个 Key 永远生成同一个 Hash，但无法从 Hash 反推出 Key。
-- **首次提交时绑定 Agent 地址**：之后只有该 Agent 可以使用此 keyHash 提交证明。
-- **`total_usage` 严格递增**：每次提交必须大于上次记录值，仅计算增量部分的得分。同一份账单无法被重复使用。
+- **`label`** 是 OpenRouter 为每个 API Key 分配的唯一标识符，由 Key 的前缀和后缀组成（如 `sk-or-v1-74b...85e`），与 Key 一一映射。
+- **`labelHash = keccak256(label)`** 作为链上指纹：同一个 Key 的 label 永远相同，因此 Hash 也永远相同。
+- **首次提交时绑定 Agent 地址**：之后只有该 Agent 可以使用此 labelHash 提交证明。
+- **`usage` 严格递增**：每次提交必须大于上次记录值，仅计算增量部分的得分。同一份账单无法被重复使用。
 
 #### 攻击分析
 
 | 攻击方式 | 是否可行 | 原因 |
 |:---|:---:|:---|
-| 伪造 `total_usage` | ❌ | ZK 电路从 Notary 验证的真实 TLS 响应中提取，无法篡改 |
-| 伪造 `keyHash` | ❌ | ZK 电路内部从 Authorization header 中提取 Key 并计算 Hash，不接受外部输入 |
-| 用假 API Key | ❌ | OpenRouter 返回 401 错误，无有效响应可用于生成证明 |
-| 伪造 TLS 响应 | ❌ | Notary 参与了 TLS 握手，验证服务器证书链和会话完整性 |
-| 同一账单提交两次 | ❌ | `total_usage` 严格递增检查 + keyHash 绑定 |
-| 用他人 API Key | ❌ | 需要实际持有该 Key 才能发起 TLS 会话 |
-| 重放旧证明 | ❌ | `lastReportedUsage` 要求 `totalUsage` 严格大于上次记录 |
+| 伪造 `usage` 金额 | ❌ | Reclaim Attestor 从 TLS 验证的真实响应中提取，Attestor 签名保证不可篡改 |
+| 伪造 `label` | ❌ | 同上——`label` 由 Attestor 从响应体中提取并签名，无法替换 |
+| 用假 API Key | ❌ | OpenRouter 返回 401 错误，无有效响应可用于生成 attestation |
+| 伪造 TLS 响应 | ❌ | Attestor 参与了 TLS 会话，验证服务器证书链和会话完整性 |
+| 同一账单提交两次 | ❌ | `usage` 严格递增检查 + labelHash 绑定 |
+| 用他人 API Key | ❌ | 需要实际持有该 Key 才能发起 TLS 会话并获取有效响应 |
+| 重放旧证明 | ❌ | `lastReportedUsage` 要求 `usage` 严格大于上次记录 |
+| 一个 Key 注册多个 Agent | ❌ | `labelOwner` 在首次绑定后锁定，同一 label 只能属于一个 Agent |
 
 #### 中间件集成：Reclaim Protocol
 
-协议计划采用 **Reclaim Protocol** 作为 zkTLS 中间件基础设施：
+协议采用 **Reclaim Protocol** 作为 zkTLS 中间件基础设施：
 
-- Reclaim 提供生产就绪的 SDK，支持自定义 HTTPS Provider（如 OpenRouter、OpenAI 等）；
-- Agent 在本地通过 Reclaim SDK 发起带 Notary 的 TLS 会话，生成标准化的 ZK 证明；
-- 证明可直接提交至链上合约进行验证，无需信任任何中心化服务器。
+- Reclaim 提供生产就绪的 SDK，支持自定义 HTTPS Provider；
+- 为 OpenRouter 配置专用 Provider，指定从 `/api/v1/key` 响应中提取 `label` 和 `usage` 字段；
+- Agent 在本地通过 Reclaim SDK 发起带 Attestor 的 TLS 会话，Attestor 见证响应内容并生成签名 attestation；
+- Attestation 可提交至链上合约进行验证，或提交至中心化 Verifier（Phase 1 阶段）。
 
-通过 zkTLS，ERC-8004 账单算力认证实现了**三重安全保证**：Agent 的 API Key 永不离开本地设备，账单数据由 TLS 协议的密码学保证不可伪造，而链上的 keyHash 绑定与增量校验机制彻底消除了双花可能。
+**可扩展性**：同一套架构适用于任何 LLM 提供商，只需为每个提供商配置对应的 Reclaim Provider（指定 API 端点和响应中的唯一标识符 + 消费字段）。
+
+通过 zkTLS + Reclaim Protocol，ERC-8004 账单算力认证实现了**三重安全保证**：Agent 的 API Key 永不离开本地设备（Attestor 只能看到响应体，不能看到请求头中的 Key），账单数据由 TLS 协议和 Attestor 签名双重保证不可伪造，而链上的 `label` 绑定与增量校验机制彻底消除了双花可能。
 
 ---
 
