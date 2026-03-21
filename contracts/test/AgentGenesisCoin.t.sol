@@ -1107,8 +1107,9 @@ contract AgentGenesisCoinTest is Test {
         address nonManager = address(0x999);
         vm.deal(nonManager, ethAmount);
         vm.prank(nonManager);
+        bool success;
         vm.expectRevert("Only Likwid Position Manager can send ETH");
-        (bool success,) = address(coin).call{value: ethAmount}("");
+        (success,) = address(coin).call{value: ethAmount}("");
         // expectRevert catches the revert, the low level call would otherwise return false.
         // With expectRevert, the test fails if it does NOT revert.
     }
