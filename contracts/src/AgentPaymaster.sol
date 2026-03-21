@@ -211,12 +211,7 @@ contract AgentPaymaster is BasePaymaster {
     }
 
     function rescueFunds(address token, address recipient, uint256 amount) external onlyOwner {
-        if (token == address(0)) {
-            (bool success,) = recipient.call{value: amount}("");
-            require(success, "ETH transfer failed");
-        } else {
-            IERC20(token).safeTransfer(recipient, amount);
-        }
+        IERC20(token).safeTransfer(recipient, amount);
     }
 
     /**
