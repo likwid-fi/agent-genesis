@@ -48,6 +48,133 @@ The current PoA implementation is a Minimum Viable Product (MVP) with the follow
 - **Within one month of protocol launch**: Implement zkTLS proof submission on-chain and ERC-8004 billing on-chain verification.
 - **Within one month of protocol launch**: Launch the x402 economic activity analysis module; fully decentralize the Agent reputation system.
 
+### 2.2 ERC-8004 Billing Authentication: zkTLS Zero-Knowledge Verification
+
+ERC-8004 Billing Authentication addresses a core challenge: **How can an Agent prove that real LLM compute expenditure exists behind it, without revealing its API Key, while ensuring the proof is unforgeable and non-replayable?**
+
+#### The Challenge
+
+Taking OpenRouter as an example, an Agent queries its billing via `GET /api/v1/credits`:
+
+```
+Request: GET https://openrouter.ai/api/v1/credits
+Header: Authorization: Bearer sk-or-v1-74bb... (API Key)
+
+Response: {"data":{"total_credits":20,"total_usage":10}}
+```
+
+This response presents three problems:
+1. **No unique identifier** — The response contains no unique ID bound to the API Key;
+2. **No server signature** — The response body carries no cryptographic signature; anyone can fabricate a JSON;
+3. **No replay protection** — The same response can be submitted repeatedly.
+
+Traditional approaches either require the Agent to hand over its API Key to the verifier (privacy breach) or depend on API providers adding signing endpoints (uncontrollable).
+
+#### Solution: zkTLS (TLS Notary)
+
+**zkTLS is the only technical path that simultaneously satisfies the triple constraints of "no key disclosure, unforgeability, and non-replayability."**
+
+Its core principle leverages the cryptographic guarantees inherent to the TLS protocol itself: the server certificate and session keys within the TLS handshake prove that data genuinely originates from the target server. zkTLS introduces a neutral **Notary node** into the TLS key negotiation process, enabling it to attest to the authenticity of the response while **being unable to access the request plaintext** (i.e., it cannot see the API Key).
+
+#### Complete Verification Flow
+
+```
+Agent                    TLS Notary               OpenRouter
+  │                         │                         │
+  │── Three-party TLS ────→│←───────────────────────→│
+  │  handshake              │                         │
+  │  (Notary participates   │                         │
+  │   in key negotiation,   │                         │
+  │   gains verification    │                         │
+  │   but not decryption)   │                         │
+  │                         │                         │
+  │── GET /credits ────────→│──────── Forward ───────→│
+  │  (with Authorization)   │ (Notary cannot read     │
+  │                         │  plaintext)             │
+  │                         │                         │
+  │←── Response ────────────│←─────── Response ──────│
+  │  {total_usage: 10}      │ (Notary can verify      │
+  │                         │  TLS signature)         │
+  │                         │                         │
+  │── Generate ZK Proof ───→│                         │
+```
+
+The Agent locally generates a **Zero-Knowledge Proof (ZK Proof)** that publicly outputs the following fields while keeping the API Key as a private input:
+
+| Field | Public? | Purpose |
+|:---|:---:|:---|
+| `domain` | ✅ Public | Proves data genuinely originates from `openrouter.ai` |
+| `path` | ✅ Public | Proves the `/api/v1/credits` endpoint was called |
+| `total_usage` | ✅ Public | Used to calculate the TFA compute score |
+| `keyHash = keccak256(apiKey)` | ✅ Public | Unique fingerprint of the API Key for double-spend prevention |
+| `agentAddress` | ✅ Public | Binds the proof to a specific Agent address |
+| `apiKey` | ❌ Private | Privacy-protected; used internally within the ZK circuit but never exposed |
+
+**Critical security guarantee**: `keyHash` is not externally supplied by the Agent. Instead, the ZK circuit extracts the API Key from the `Authorization` header of the real HTTP session verified by the TLS Notary, then computes `keccak256` internally within the circuit. Any tampering causes proof verification to fail.
+
+#### On-Chain Verification & Double-Spend Prevention
+
+```solidity
+mapping(bytes32 => uint256) public lastReportedUsage;  // keyHash → last submitted total_usage
+mapping(bytes32 => address) public keyHashOwner;        // keyHash → bound Agent address
+
+function submitBillingProof(
+    bytes calldata zkProof,
+    uint256 totalUsage,
+    bytes32 keyHash,
+    address agent
+) external {
+    // 1. Verify zkTLS proof (confirm data originates from a real TLS session)
+    require(verifyZkTlsProof(zkProof, totalUsage, keyHash, agent), "Invalid proof");
+
+    // 2. Binding check: one API Key can only bind to one Agent
+    if (keyHashOwner[keyHash] == address(0)) {
+        keyHashOwner[keyHash] = agent;  // First-time binding
+    } else {
+        require(keyHashOwner[keyHash] == agent, "Key bound to another agent");
+    }
+
+    // 3. Incremental verification: total_usage must strictly increase
+    uint256 lastUsage = lastReportedUsage[keyHash];
+    require(totalUsage > lastUsage, "No new usage");
+
+    // 4. Calculate increment and map to TFA score
+    uint256 increment = totalUsage - lastUsage;
+    lastReportedUsage[keyHash] = totalUsage;
+
+    uint256 score = _usageToScore(increment);
+    // → Use score for PoA mining
+}
+```
+
+#### Double-Spend Prevention Mechanism
+
+- **`keyHash = keccak256(apiKey)`** serves as the API Key's unique on-chain fingerprint: the same Key always produces the same Hash, but the Key cannot be reverse-engineered from the Hash.
+- **Agent address binding on first submission**: Only that Agent can subsequently submit proofs using this keyHash.
+- **Strictly increasing `total_usage`**: Each submission must exceed the previously recorded value; only the incremental portion is scored. The same billing data cannot be reused.
+
+#### Attack Analysis
+
+| Attack Vector | Feasible? | Reason |
+|:---|:---:|:---|
+| Fabricate `total_usage` | ❌ | ZK circuit extracts from the real TLS response verified by the Notary; cannot be tampered with |
+| Fabricate `keyHash` | ❌ | ZK circuit internally extracts the Key from the Authorization header and computes the Hash; no external input accepted |
+| Use a fake API Key | ❌ | OpenRouter returns a 401 error; no valid response available to generate a proof |
+| Forge TLS response | ❌ | Notary participated in the TLS handshake, verifying the server certificate chain and session integrity |
+| Submit same billing twice | ❌ | Strictly increasing `total_usage` check + keyHash binding |
+| Use someone else's API Key | ❌ | Must actually possess the Key to initiate the TLS session |
+| Replay old proof | ❌ | `lastReportedUsage` requires `totalUsage` strictly greater than the last record |
+
+#### Middleware Integration: Reclaim Protocol
+
+The protocol plans to adopt **Reclaim Protocol** as the zkTLS middleware infrastructure:
+
+- Reclaim provides a production-ready SDK supporting custom HTTPS Providers (e.g., OpenRouter, OpenAI, etc.);
+- The Agent locally initiates a Notary-enabled TLS session via the Reclaim SDK, generating a standardized ZK proof;
+- The proof can be submitted directly to on-chain contracts for verification, requiring no trust in any centralized server.
+
+Through zkTLS, ERC-8004 Billing Authentication achieves a **triple security guarantee**: the Agent's API Key never leaves the local device, billing data is rendered unforgeable by the cryptographic guarantees of the TLS protocol, and the on-chain keyHash binding combined with incremental verification completely eliminates the possibility of double-spending.
+
 ---
 
 ## 3. Tokenomics
