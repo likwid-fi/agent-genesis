@@ -31,6 +31,8 @@ contract AgentPaymaster is BasePaymaster {
 
     uint256 public constant POST_OP_GAS = 500000;
 
+    mapping(address => bool) public hasFreeMined;
+
     constructor(IEntryPoint _entryPoint, address _agcToken) BasePaymaster(_entryPoint) Ownable(msg.sender) {
         AGC_TOKEN = IERC20(_agcToken);
         AgentGenesisCoin agc = AgentGenesisCoin(payable(address(_agcToken)));
@@ -45,39 +47,60 @@ contract AgentPaymaster is BasePaymaster {
         VAULT = IVault(IBasePositionManager(address(POSITION_MANAGER)).vault());
     }
 
+    function _slice(bytes memory data, uint256 start) internal pure returns (bytes memory) {
+        bytes memory result = new bytes(data.length - start);
+        for (uint256 i = 0; i < result.length; i++) {
+            result[i] = data[i + start];
+        }
+        return result;
+    }
+
     // Check if the operation is entirely composed of free mine() calls
-    function _isFreeMine(bytes calldata callData) internal view returns (bool) {
+    function _isFreeMine(bytes calldata callData, address sender) internal view returns (bool) {
         if (callData.length < 4) return false;
 
         bytes4 outerSelector = bytes4(callData[0:4]);
 
         // SimpleAccount execute: execute(address dest, uint256 value, bytes func) (0xb61d27f6)
         if (outerSelector == 0xb61d27f6) {
-            if (callData.length < 100) return false;
-            address parsedDest = address(bytes20(callData[16:36]));
-
-            uint256 dataOffset = uint256(bytes32(callData[68:100])) + 4; // Add 4 for the outer selector
-            if (callData.length < dataOffset + 32) return false;
-
-            uint256 dataLength = uint256(bytes32(callData[dataOffset:dataOffset + 32]));
-            if (dataLength >= 4 && callData.length >= dataOffset + 36) {
-                bytes4 innerSelector = bytes4(callData[dataOffset + 32:dataOffset + 36]);
-                return parsedDest == address(AGC_TOKEN) && innerSelector == AgentGenesisCoin.mine.selector;
+            (address dest,, bytes memory func) = abi.decode(callData[4:], (address, uint256, bytes));
+            if (dest == address(AGC_TOKEN) && func.length >= 4) {
+                bytes4 innerSelector;
+                assembly {
+                    innerSelector := mload(add(func, 32))
+                }
+                if (innerSelector == AgentGenesisCoin.mine.selector) {
+                    (uint256 score, bytes memory signature, uint256 nonce) =
+                        abi.decode(_slice(func, 4), (uint256, bytes, uint256));
+                    return
+                        AgentGenesisCoin(payable(address(AGC_TOKEN)))
+                            .verifyMineSignature(sender, score, signature, nonce);
+                }
             }
             return false;
         }
         // SimpleAccount executeBatch: executeBatch(address[] dest, bytes[] func) (0x47e1da2a)
         else if (outerSelector == 0x47e1da2a) {
-            if (callData.length < 68) return false;
-
             (address[] memory targets, bytes[] memory datas) = abi.decode(callData[4:], (address[], bytes[]));
             if (targets.length == 0 || targets.length != datas.length) return false;
 
             for (uint256 i = 0; i < targets.length; i++) {
                 if (targets[i] != address(AGC_TOKEN)) return false;
                 if (datas[i].length < 4) return false;
-                bytes4 innerSelector = bytes4(datas[i]);
+
+                bytes4 innerSelector;
+                bytes memory funcData = datas[i];
+                assembly {
+                    innerSelector := mload(add(funcData, 32))
+                }
                 if (innerSelector != AgentGenesisCoin.mine.selector) return false;
+
+                (uint256 score, bytes memory signature, uint256 nonce) =
+                    abi.decode(_slice(funcData, 4), (uint256, bytes, uint256));
+                if (!AgentGenesisCoin(payable(address(AGC_TOKEN))).verifyMineSignature(sender, score, signature, nonce))
+                {
+                    return false;
+                }
             }
             return true;
         }
@@ -95,8 +118,9 @@ contract AgentPaymaster is BasePaymaster {
         override
         returns (bytes memory context, uint256 validationData)
     {
-        // Mode 0: mine() is permanently FREE
-        if (_isFreeMine(userOp.callData)) {
+        // Mode 0: mine() is permanently FREE for the first time
+        if (_isFreeMine(userOp.callData, userOp.sender) && !hasFreeMined[userOp.sender]) {
+            hasFreeMined[userOp.sender] = true;
             context = abi.encode(uint8(0), userOp.sender, uint256(0), uint256(0));
             return (context, 0); // 0 means signature validation success (we don't need additional paymaster sigs here)
         }
@@ -163,13 +187,19 @@ contract AgentPaymaster is BasePaymaster {
                     AGC_TOKEN.safeTransfer(sender, amountIn - amountInUsed);
                 }
             } catch {
-                amountIn = AGC_TOKEN.balanceOf(address(this));
+                Reserves pairReserves = StateLibrary.getPairReserves(VAULT, POOL_ID);
+                Reserves truncatedReserves = StateLibrary.getTruncatedReserves(VAULT, POOL_ID);
+                (uint256 expectedOut,,) =
+                    SwapMath.getAmountOut(pairReserves, truncatedReserves, POOL_FEE, false, amountIn);
+
+                uint256 minOut = expectedOut * 80 / 100;
+
                 IPairPositionManager.SwapInputParams memory inputParams = IPairPositionManager.SwapInputParams({
                     poolId: POOL_ID,
                     zeroForOne: false,
                     to: address(this),
                     amountIn: amountIn,
-                    amountOutMin: 0,
+                    amountOutMin: minOut,
                     deadline: block.timestamp + 30
                 });
                 try POSITION_MANAGER.exactInput(inputParams) {} catch {}
@@ -178,6 +208,15 @@ contract AgentPaymaster is BasePaymaster {
             }
         }
         // If Mode 0 (Free mine), do nothing, we eat the ETH cost.
+    }
+
+    function rescueFunds(address token, address recipient, uint256 amount) external onlyOwner {
+        if (token == address(0)) {
+            (bool success,) = recipient.call{value: amount}("");
+            require(success, "ETH transfer failed");
+        } else {
+            IERC20(token).safeTransfer(recipient, amount);
+        }
     }
 
     /**

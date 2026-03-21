@@ -215,6 +215,17 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
     // --- Core Functions ---
 
+    function verifyMineSignature(address sender, uint256 score, bytes calldata signature, uint256 nonce)
+        public
+        view
+        returns (bool)
+    {
+        bytes32 hash = _getHash(sender, nonce, score);
+        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(hash);
+        address signer = ECDSA.recover(ethSignedMessageHash, signature);
+        return signer == mineSigner;
+    }
+
     function mine(uint256 score, bytes calldata signature, uint256 nonce) external payable nonReentrant {
         // 1. Frequency Check
         if (score == 0) revert InvalidSignature(); // Prevent zero-score mines
@@ -236,10 +247,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
         // 4. Verify Signature
 
-        bytes32 hash = _getHash(msg.sender, nonce, score);
-        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(hash);
-        address signer = ECDSA.recover(ethSignedMessageHash, signature);
-        if (signer != mineSigner) revert InvalidSignature();
+        if (!verifyMineSignature(msg.sender, score, signature, nonce)) revert InvalidSignature();
 
         // 5. Calculate Reward
         uint256 reward = _applyScoreAndCalculateReward(score);

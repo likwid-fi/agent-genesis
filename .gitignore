@@ -9,5 +9,7 @@
 !/bootstrap.sh
 !contracts/src/AgentGenesisCoin.sol
 !contracts/src/AgentPaymaster.sol
+!contracts/test/AgentGenesisCoin.t.sol
+!contracts/test/AgentPaymaster.t.sol
 # Ignore unnecessary special cases
 !*/
