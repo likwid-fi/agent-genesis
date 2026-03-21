@@ -123,7 +123,7 @@ $$
 
 #### 级联衰减机制（Cascade Decay）
 
-如果历史累计发放量 $minedTotal$ 越过衰减线，$BaseReward$ **即时、连续**地衰减：
+如果历史累计发放量 $minedTotal$ 越过衰减线， $BaseReward$ **即时、连续**地衰减：
 
 $$
 \text{while } minedTotal \geq nextDecayThreshold: \quad BaseReward \leftarrow BaseReward \times 0.999
@@ -133,7 +133,7 @@ $$
 
 #### 算法示例推演
 
-假设系统冷启动（$S_{prev} = 100$，`DEFAULT_LAST_SCORE`），$BaseReward = 15{,}750{,}000$。
+假设系统冷启动 ($S_{prev} = 100$，`DEFAULT_LAST_SCORE`) ， $BaseReward = 15{,}750{,}000$ 。
 
 | Epoch | 触发动作 | $s_i$ | $S_{curr}$ | $S_{prev}$ | 阶段 | 分母 | 单次 Reward | 历史累计发放量 |
 |:---|:---|:---:|:---:|:---:|:---:|:---:|:---|:---|
