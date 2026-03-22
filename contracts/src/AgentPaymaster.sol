@@ -48,9 +48,10 @@ contract AgentPaymaster is BasePaymaster {
     }
 
     function _slice(bytes memory data, uint256 start) internal pure returns (bytes memory) {
-        bytes memory result = new bytes(data.length - start);
-        for (uint256 i = 0; i < result.length; i++) {
-            result[i] = data[i + start];
+        uint256 length = data.length - start;
+        bytes memory result = new bytes(length);
+        assembly {
+            mcopy(add(result, 32), add(data, add(32, start)), length)
         }
         return result;
     }

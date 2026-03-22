@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {AgentPaymaster} from "../src/AgentPaymaster.sol";
 import {AgentGenesisCoin} from "../src/AgentGenesisCoin.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
-import {UserOperation} from "@account-abstraction/contracts/interfaces/UserOperation.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {IPairPositionManager} from "@likwid-fi/core/interfaces/IPairPositionManager.sol";
 
 contract AgentPaymasterHarness is AgentPaymaster {
     constructor(IEntryPoint _entryPoint, address _agcToken) AgentPaymaster(_entryPoint, _agcToken) {}
@@ -48,7 +46,7 @@ contract AgentPaymasterTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    function testIsFreeMineExecute() public {
+    function testIsFreeMineExecute() public view {
         uint256 score = 50;
         uint256 nonce = 1;
         bytes memory signature = _generateSignature(user, nonce, score);
@@ -74,7 +72,7 @@ contract AgentPaymasterTest is Test {
         assertFalse(isFreeWrongSender, "Should be false for incorrect sender (signature mismatch)");
     }
 
-    function testIsFreeMineExecuteBatch() public {
+    function testIsFreeMineExecuteBatch() public view {
         uint256 score1 = 50;
         uint256 nonce1 = 1;
         bytes memory signature1 = _generateSignature(user, nonce1, score1);
@@ -110,7 +108,7 @@ contract AgentPaymasterTest is Test {
         assertFalse(isFreeWrongSender, "Should be false for incorrect sender (signature mismatch)");
     }
 
-    function testIsFreeMineExecuteNotMine() public {
+    function testIsFreeMineExecuteNotMine() public view {
         // Encode a random non-mine call
         bytes memory notMineCall = abi.encodeWithSignature("transfer(address,uint256)", address(0x111), 100);
 
@@ -125,7 +123,7 @@ contract AgentPaymasterTest is Test {
         assertFalse(isFree, "Should be false for non-mine execute");
     }
 
-    function testIsFreeMineExecuteBatchMixed() public {
+    function testIsFreeMineExecuteBatchMixed() public view {
         uint256 score1 = 50;
         uint256 nonce1 = 1;
         bytes memory signature1 = _generateSignature(user, nonce1, score1);
