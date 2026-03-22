@@ -1,6 +1,7 @@
 const { createSmartAccountClient } = require("permissionless");
 const { signerToSimpleSmartAccount } = require("permissionless/accounts");
 const { createPimlicoBundlerClient } = require("permissionless/clients/pimlico");
+const { ReclaimClient } = require("@reclaimprotocol/zk-fetch");
 const {
   createPublicClient,
   http,
@@ -18,9 +19,38 @@ const os = require("os");
 const axios = require("axios");
 
 // ======================= CONFIGURATION =======================
+//const VERIFIER_URL = "https://verifier.likwid.fi";
+const VERIFIER_URL = "http://localhost:8000"; // Local testing against dev server
 const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
 const PIMLICO_API_KEY = process.env.PIMLICO_API_KEY || "pim_KpSstT3FhZNDhk8PxECxQG";
 const BUNDLER_URL = `https://api.pimlico.io/v2/11155111/rpc?apikey=${PIMLICO_API_KEY}`;
+
+// Load extra config from local .env if exists
+let MODEL_TYPE = process.env.MODEL_TYPE || null;
+let MODEL_KEY = process.env.MODEL_KEY || null;
+try {
+  const envPath = path.join(process.cwd(), ".env");
+  console.log(`> Looking for local .env config at ${envPath}...`);
+  if (fs.existsSync(envPath)) {
+    console.log(`> .env file found, loading configuration...`);
+    const envContent = fs.readFileSync(envPath, "utf8");
+    for (const line of envContent.split("\n")) {
+      const parts = line.split("=");
+      if (parts.length >= 2) {
+        const key = parts[0].trim();
+        const value = parts
+          .slice(1)
+          .join("=")
+          .trim()
+          .replace(/(^"|"$)/g, "");
+        if (key === "MODEL_TYPE") MODEL_TYPE = value;
+        if (key === "MODEL_KEY") MODEL_KEY = value;
+      }
+    }
+  }
+} catch (e) {
+  // ignore
+}
 
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -305,8 +335,6 @@ async function get_smart_account() {
 
 // ======================= MINING WORKFLOW =======================
 
-const VERIFIER_URL = "https://verifier.likwid.fi";
-
 async function status() {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found. Run create_wallet first.");
@@ -425,17 +453,83 @@ async function challenge() {
   }
 }
 
+async function reclaim_bill(op) {
+  let reclaimProofStr = null;
+  let modelTypeStr = null;
+  const print_proof = op === "pp";
+  if (MODEL_TYPE && MODEL_KEY) {
+    console.log(`> 🔍 Detected API Key for ${MODEL_TYPE}, generating Reclaim proof...`);
+    try {
+      const sigRes = await axios.get(`${VERIFIER_URL}/session-signature`);
+      const { appId, signature } = sigRes.data;
+      console.log(`> Received session signature from verifier, generating Reclaim proof...`);
+
+      const client = new ReclaimClient(appId, signature);
+
+      if (MODEL_TYPE.toLowerCase() === "openrouter") {
+        const proof = await client.zkFetch(
+          "https://openrouter.ai/api/v1/key",
+          {
+            method: "GET",
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${MODEL_KEY}`,
+            },
+            responseMatches: [
+              {
+                type: "regex",
+                value: '"label":\\s*"(?<label>[^"]+)"',
+              },
+              {
+                type: "regex",
+                value: '"usage":(?<usage>[0-9.]+)',
+              },
+            ],
+          },
+        );
+
+        reclaimProofStr = JSON.stringify(proof);
+        modelTypeStr = "openrouter";
+        if (print_proof) {
+          console.log(`> 🔐 Reclaim proof:`);
+          console.log(JSON.stringify(proof, null, 2));
+        } else {
+          console.log(`> 🔐 Reclaim proof generated successfully.`);
+        }
+      } else {
+        console.log(`> ⚠️ Unsupported MODEL_TYPE: ${MODEL_TYPE}`);
+      }
+    } catch (e) {
+      console.log(`> ⚠️ Reclaim proof generation failed: ${e.message}`);
+      console.error(e);
+    }
+  } else {
+    console.log(`> 🔍 No MODEL_TYPE and MODEL_KEY configured, skipping Reclaim proof generation.`);
+  }
+  return { reclaimProofStr, modelTypeStr };
+}
+
 async function verify(answer, constraints) {
   if (!answer || !constraints) return formatError("Usage: verify <answer> <constraints>");
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
   const account = await getSmartAccount(signer);
+
+  const { reclaimProofStr, modelTypeStr } = await reclaim_bill();
+
   try {
-    const res = await axios.post(`${VERIFIER_URL}/verify`, {
+    const payload = {
       wallet_address: account.address,
       answer_text: answer,
       constraints: constraints,
-    });
+    };
+    if (reclaimProofStr) {
+      payload.reclaim_proof = reclaimProofStr;
+      payload.model_type = modelTypeStr;
+    }
+
+    const res = await axios.post(`${VERIFIER_URL}/verify`, payload);
     const d = res.data;
     if (d.success) {
       console.log(`> ✅ Verification Passed`);
@@ -450,7 +544,7 @@ async function verify(answer, constraints) {
     console.log(`> ---`);
     console.log(JSON.stringify(d, null, 2));
   } catch (e) {
-    formatError(`Verification failed: ${e.response?.data?.message || e.message}`);
+    formatError(`Verification failed: ${e.response?.data?.detail || e.response?.data?.message || e.message}`);
   }
 }
 
@@ -648,7 +742,12 @@ async function swap_command(direction, amountStr, slippageStr = "1") {
       swapCalls.push(approval);
     }
     // Also approve Paymaster to spend AGC for sponsorship
-    const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000")); // Approve a large amount
+    const pmApproval = await getApprovalCall(
+      account.address,
+      AGC_TOKEN_ADDRESS,
+      AGENT_PAYMASTER_ADDRESS,
+      parseEther("1000000"),
+    ); // Approve a large amount
     if (pmApproval) {
       console.log(`> Approving AGC for Paymaster sponsorship...`);
       description += `Approve AGC for Paymaster + `;
@@ -721,7 +820,12 @@ async function lp_add(amountEthStr, slippageStr = "1") {
   }
 
   // Also approve Paymaster to spend AGC for sponsorship
-  const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000"));
+  const pmApproval = await getApprovalCall(
+    account.address,
+    AGC_TOKEN_ADDRESS,
+    AGENT_PAYMASTER_ADDRESS,
+    parseEther("1000000"),
+  );
   if (pmApproval) {
     console.log(`> Approving AGC for Paymaster sponsorship...`);
     lpCalls.push(pmApproval);
@@ -769,7 +873,12 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
   }
 
   // Also approve Paymaster to spend AGC for sponsorship
-  const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000"));
+  const pmApproval = await getApprovalCall(
+    account.address,
+    AGC_TOKEN_ADDRESS,
+    AGENT_PAYMASTER_ADDRESS,
+    parseEther("1000000"),
+  );
   if (pmApproval) {
     console.log(`> Approving AGC for Paymaster sponsorship...`);
     marginCalls.push(pmApproval);
@@ -827,7 +936,12 @@ async function lend_open(asset, amountStr) {
   }
 
   // Also approve Paymaster to spend AGC for sponsorship
-  const pmApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, AGENT_PAYMASTER_ADDRESS, parseEther("1000000"));
+  const pmApproval = await getApprovalCall(
+    account.address,
+    AGC_TOKEN_ADDRESS,
+    AGENT_PAYMASTER_ADDRESS,
+    parseEther("1000000"),
+  );
   if (pmApproval) {
     console.log(`> Approving AGC for Paymaster sponsorship...`);
     lendCalls.push(pmApproval);
@@ -1285,82 +1399,88 @@ Position Management:
   process.exit(0);
 }
 
-switch (command) {
-  case "check_wallet":
-    check_wallet();
-    break;
-  case "create_wallet":
-    create_wallet();
-    break;
-  case "get_smart_account":
-    get_smart_account();
-    break;
-  case "status":
-    status();
-    break;
-  case "challenge":
-    challenge();
-    break;
-  case "verify":
-    verify(args[1], args[2]);
-    break;
-  case "cost":
-    cost(args[1]);
-    break;
-  case "cooldown":
-    cooldown();
-    break;
-  case "reward":
-    reward(args[1]);
-    break;
-  case "mine":
-    mine(args[1], args[2], args[3], args[4]);
-    break;
-  case "vest":
-    claimVested();
-    break;
-  case "claimable":
-    claimable();
-    break;
-  case "swap":
-    swap_command(args[1], args[2], args[3]);
-    break;
-  case "lp_add":
-    lp_add(args[1], args[2]);
-    break;
-  case "margin_open":
-    margin_open(args[1], args[2], args[3]);
-    break;
-  case "lend_open":
-    lend_open(args[1], args[2]);
-    break;
-  case "liquidate":
-    liquidate_position(args[1]);
-    break;
-  case "scan":
-    scan_liquidations(args[1]);
-    break;
-  case "positions":
-    positions();
-    break;
-  case "margin_info":
-    margin_info(args[1]);
-    break;
-  case "margin_close":
-    margin_close(args[1]);
-    break;
-  case "lp_info":
-    lp_info(args[1]);
-    break;
-  case "lp_remove":
-    lp_remove(args[1]);
-    break;
-  case "lend_info":
-    lend_info(args[1]);
-    break;
-  case "lend_close":
-    lend_close(args[1], args[2]);
-    break;
-  default:
-    console.log("Unknown command:", command);
-}
+(async () => {
+  switch (command) {
+    case "check_wallet":
+      await check_wallet();
+      break;
+    case "create_wallet":
+      await create_wallet();
+      break;
+    case "get_smart_account":
+      await get_smart_account();
+      break;
+    case "status":
+      await status();
+      break;
+    case "challenge":
+      await challenge();
+      break;
+    case "verify":
+      await verify(args[1], args[2]);
+      break;
+    case "cost":
+      await cost(args[1]);
+      break;
+    case "cooldown":
+      await cooldown();
+      break;
+    case "reward":
+      await reward(args[1]);
+      break;
+    case "mine":
+      await mine(args[1], args[2], args[3], args[4]);
+      break;
+    case "vest":
+      await claimVested();
+      break;
+    case "claimable":
+      await claimable();
+      break;
+    case "swap":
+      await swap_command(args[1], args[2], args[3]);
+      break;
+    case "lp_add":
+      await lp_add(args[1], args[2]);
+      break;
+    case "margin_open":
+      await margin_open(args[1], args[2], args[3]);
+      break;
+    case "lend_open":
+      await lend_open(args[1], args[2]);
+      break;
+    case "liquidate":
+      await liquidate_position(args[1]);
+      break;
+    case "scan":
+      await scan_liquidations(args[1]);
+      break;
+    case "positions":
+      await positions();
+      break;
+    case "margin_info":
+      await margin_info(args[1]);
+      break;
+    case "margin_close":
+      await margin_close(args[1]);
+      break;
+    case "lp_info":
+      await lp_info(args[1]);
+      break;
+    case "lp_remove":
+      await lp_remove(args[1]);
+      break;
+    case "lend_info":
+      await lend_info(args[1]);
+      break;
+    case "lend_close":
+      await lend_close(args[1], args[2]);
+      break;
+    case "reclaim_bill":
+      await reclaim_bill(args[1]);
+      break;
+    default:
+      console.log("Unknown command:", command);
+  }
+  process.exit(0);
+})();
