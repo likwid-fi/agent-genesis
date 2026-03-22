@@ -23,6 +23,7 @@ import {AgentGenesisCoin} from "./AgentGenesisCoin.sol";
 contract AgentPaymaster is BasePaymaster {
     using SafeERC20 for IERC20;
 
+    // --- Config ---
     IERC20 public immutable AGC_TOKEN;
     IVault public immutable VAULT;
     IPairPositionManager public immutable POSITION_MANAGER;
@@ -31,6 +32,7 @@ contract AgentPaymaster is BasePaymaster {
 
     uint256 public constant POST_OP_GAS = 500000;
 
+    // --- User State ---
     mapping(address => bool) public hasFreeMined;
 
     constructor(IEntryPoint _entryPoint, address _agcToken) BasePaymaster(_entryPoint) Ownable(msg.sender) {
@@ -47,6 +49,12 @@ contract AgentPaymaster is BasePaymaster {
         VAULT = IVault(IBasePositionManager(address(POSITION_MANAGER)).vault());
     }
 
+    // --- Admin ---
+    function rescueFunds(address token, address recipient, uint256 amount) external onlyOwner {
+        IERC20(token).safeTransfer(recipient, amount);
+    }
+
+    // --- Internal Functions ---
     function _slice(bytes memory data, uint256 start) internal pure returns (bytes memory) {
         uint256 length = data.length - start;
         bytes memory result = new bytes(length);
@@ -209,10 +217,6 @@ contract AgentPaymaster is BasePaymaster {
             }
         }
         // If Mode 0 (Free mine), do nothing, we eat the ETH cost.
-    }
-
-    function rescueFunds(address token, address recipient, uint256 amount) external onlyOwner {
-        IERC20(token).safeTransfer(recipient, amount);
     }
 
     /**
