@@ -33,20 +33,16 @@ try {
   console.log(`> Looking for local .env config at ${envPath}...`);
   if (fs.existsSync(envPath)) {
     console.log(`> .env file found, loading configuration...`);
-    const envContent = fs.readFileSync(envPath, "utf8");
-    for (const line of envContent.split("\n")) {
-      const parts = line.split("=");
-      if (parts.length >= 2) {
-        const key = parts[0].trim();
-        const value = parts
-          .slice(1)
-          .join("=")
-          .trim()
-          .replace(/(^"|"$)/g, "");
-        if (key === "MODEL_TYPE") MODEL_TYPE = value;
-        if (key === "MODEL_KEY") MODEL_KEY = value;
-      }
-    }
+    const envConfig = Object.fromEntries(
+      fs
+        .readFileSync(envPath, "utf8")
+        .split("\n")
+        .map((line) => line.match(/^\s*([^=]+?)\s*=(.*)$/))
+        .filter(Boolean)
+        .map(([, key, val]) => [key, val.trim().replace(/^"|"$/g, "")]),
+    );
+    MODEL_TYPE = MODEL_TYPE || envConfig.MODEL_TYPE || null;
+    MODEL_KEY = MODEL_KEY || envConfig.MODEL_KEY || null;
   }
 } catch (e) {
   // ignore
@@ -502,7 +498,6 @@ async function reclaim_bill(op) {
       }
     } catch (e) {
       console.log(`> ⚠️ Reclaim proof generation failed: ${e.message}`);
-      console.error(e);
     }
   } else {
     console.log(`> 🔍 No MODEL_TYPE and MODEL_KEY configured, skipping Reclaim proof generation.`);
