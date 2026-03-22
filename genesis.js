@@ -19,8 +19,8 @@ const os = require("os");
 const axios = require("axios");
 
 // ======================= CONFIGURATION =======================
-//const VERIFIER_URL = "https://verifier.likwid.fi";
-const VERIFIER_URL = "http://localhost:8000"; // Local testing against dev server
+const VERIFIER_URL = "https://verifier.likwid.fi";
+//const VERIFIER_URL = "http://localhost:8000"; // Local testing against dev server
 const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
 const PIMLICO_API_KEY = process.env.PIMLICO_API_KEY || "pim_KpSstT3FhZNDhk8PxECxQG";
 const BUNDLER_URL = `https://api.pimlico.io/v2/11155111/rpc?apikey=${PIMLICO_API_KEY}`;
