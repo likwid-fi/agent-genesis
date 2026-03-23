@@ -237,13 +237,12 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
         }
 
         // 4. Verify Signature
-
         if (!verifyMineSignature(msg.sender, score, signature, nonce)) revert InvalidSignature();
 
         // 5. Calculate Reward
         uint256 reward = _applyScoreAndCalculateReward(score);
 
-        // 7. Distribution Logic
+        // 6. Distribution Logic
         uint256 gasPart = (reward * 2) / 100;
 
         _mint(msg.sender, gasPart);
