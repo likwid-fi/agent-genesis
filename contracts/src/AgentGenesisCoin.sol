@@ -22,7 +22,6 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     error InvalidPaymasterAddress();
     error InvalidMineSignerAddress();
     error InvalidPositionManagerAddress();
-    error InvalidEPOCH_LENGTH();
     error WaitCooldown();
     error NonceAlreadyUsed();
     error InvalidSignature();
@@ -86,7 +85,6 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     event EcosystemFundReleased(address indexed to, uint256 amount);
     event EpochRotated(uint256 lastEpochScore, uint256 timestamp);
     event DecayTriggered(uint256 newBaseReward, uint256 newThreshold);
-    event EPOCH_LENGTHUpdated(uint256 oldValue, uint256 newValue);
     event PaymasterUpdated(address indexed oldPaymaster, address indexed newPaymaster);
     event SignerUpdated(address indexed oldSigner, address indexed newSigner);
 
