@@ -22,7 +22,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     error InvalidPaymasterAddress();
     error InvalidMineSignerAddress();
     error InvalidPositionManagerAddress();
-    error InvalidEpochLength();
+    error InvalidEPOCH_LENGTH();
     error WaitCooldown();
     error NonceAlreadyUsed();
     error InvalidSignature();
@@ -61,7 +61,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     uint256 public ecosystemFundReleased;
 
     // --- Epoch State ---
-    uint256 public epochLength = 1 days; // 24 hours
+    uint256 public constant EPOCH_LENGTH = 1 days; // 24 hours
     uint256 public currentEpochEndTime;
     uint256 public totalScoreInCurrentEpoch;
     uint256 public totalScoreInLastEpoch;
@@ -86,7 +86,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     event EcosystemFundReleased(address indexed to, uint256 amount);
     event EpochRotated(uint256 lastEpochScore, uint256 timestamp);
     event DecayTriggered(uint256 newBaseReward, uint256 newThreshold);
-    event EpochLengthUpdated(uint256 oldValue, uint256 newValue);
+    event EPOCH_LENGTHUpdated(uint256 oldValue, uint256 newValue);
     event PaymasterUpdated(address indexed oldPaymaster, address indexed newPaymaster);
     event SignerUpdated(address indexed oldSigner, address indexed newSigner);
 
@@ -100,7 +100,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
 
         mineSigner = _mineSigner;
         LIKWID_POSITION_MANAGER = _likwidPm;
-        currentEpochEndTime = block.timestamp + epochLength;
+        currentEpochEndTime = block.timestamp + EPOCH_LENGTH;
         totalScoreInLastEpoch = DEFAULT_LAST_SCORE;
         totalScoreInSecondLastEpoch = DEFAULT_LAST_SCORE;
 
@@ -131,13 +131,6 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
         address oldSigner = mineSigner;
         mineSigner = _signer;
         emit SignerUpdated(oldSigner, mineSigner);
-    }
-
-    function setEpochLength(uint256 _newEpochLength) external onlyOwner {
-        if (_newEpochLength == 0) revert InvalidEpochLength();
-        uint256 oldValue = epochLength;
-        epochLength = _newEpochLength;
-        emit EpochLengthUpdated(oldValue, _newEpochLength);
     }
 
     function releaseEcosystemFund(address recipient) external onlyOwner {
@@ -191,7 +184,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     }
 
     function getTimeUntilCanMine(address user) public view returns (uint256) {
-        uint256 nextAvailableTime = lastMineTime[user] + epochLength;
+        uint256 nextAvailableTime = lastMineTime[user] + EPOCH_LENGTH;
         return nextAvailableTime > block.timestamp ? nextAvailableTime - block.timestamp : 0;
     }
 
@@ -229,7 +222,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     function mine(uint256 score, bytes calldata signature, uint256 nonce) external payable nonReentrant {
         // 1. Frequency Check
         if (score == 0) revert InvalidSignature(); // Prevent zero-score mines
-        if (block.timestamp < lastMineTime[msg.sender] + epochLength) revert WaitCooldown();
+        if (block.timestamp < lastMineTime[msg.sender] + EPOCH_LENGTH) revert WaitCooldown();
         lastMineTime[msg.sender] = block.timestamp;
 
         // 2. Replay Check (Using Verifier Nonce)
@@ -241,7 +234,7 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
             totalScoreInSecondLastEpoch = totalScoreInLastEpoch;
             totalScoreInLastEpoch = totalScoreInCurrentEpoch > 0 ? totalScoreInCurrentEpoch : DEFAULT_LAST_SCORE;
             totalScoreInCurrentEpoch = 0;
-            currentEpochEndTime = block.timestamp + epochLength;
+            currentEpochEndTime = block.timestamp + EPOCH_LENGTH;
             emit EpochRotated(totalScoreInLastEpoch, block.timestamp);
         }
 

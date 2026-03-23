@@ -65,7 +65,7 @@ contract AgentGenesisCoinTest is Test {
             key, address(this), amount0ToAdd, amount1ToAdd, 0, 0, 10000
         );
 
-        vm.warp(block.timestamp + coin.epochLength());
+        vm.warp(block.timestamp + coin.EPOCH_LENGTH());
     }
 
     function _getHash(address signer, uint256 nonce, uint256 score) internal pure returns (bytes32) {
@@ -144,7 +144,7 @@ contract AgentGenesisCoinTest is Test {
         vm.prank(user);
         coin.mine(TEST_SCORE, signature, nonce);
 
-        vm.warp(block.timestamp + coin.epochLength());
+        vm.warp(block.timestamp + coin.EPOCH_LENGTH());
 
         vm.prank(user);
         vm.expectRevert(AgentGenesisCoin.NonceAlreadyUsed.selector);
@@ -176,8 +176,8 @@ contract AgentGenesisCoinTest is Test {
         vm.prank(user1);
         coin.mine(TEST_SCORE, signature1, nonce1);
 
-        uint256 epochLength = coin.epochLength();
-        vm.warp(block.timestamp + epochLength + 1);
+        uint256 EPOCH_LENGTH = coin.EPOCH_LENGTH();
+        vm.warp(block.timestamp + EPOCH_LENGTH + 1);
 
         uint256 nonce2 = block.timestamp;
         bytes memory signature2 = _signMine(user2, nonce2, TEST_SCORE);
@@ -407,7 +407,7 @@ contract AgentGenesisCoinTest is Test {
         assertApproxEqAbs(totalLocked1, expectedVestedPart1, 1e18);
         assertGt(lpTokenIdBefore, 0);
 
-        vm.warp(block.timestamp + coin.epochLength());
+        vm.warp(block.timestamp + coin.EPOCH_LENGTH());
 
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
@@ -492,12 +492,6 @@ contract AgentGenesisCoinTest is Test {
         assertEq(coin.mineSigner(), newMineSigner);
     }
 
-    function test_SetEpochLength() public {
-        vm.prank(coin.owner());
-        coin.setEpochLength(10000);
-        assertEq(coin.epochLength(), 10000);
-    }
-
     function test_Vesting_NotResetOnNewClaim() public {
         address user = address(0x1);
 
@@ -525,7 +519,7 @@ contract AgentGenesisCoinTest is Test {
         uint256 balanceAfterFirstClaim = coin.balanceOf(user);
         assertGt(balanceAfterFirstClaim, 0);
 
-        vm.roll(block.number + coin.epochLength());
+        vm.roll(block.number + coin.EPOCH_LENGTH());
 
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
@@ -682,7 +676,7 @@ contract AgentGenesisCoinTest is Test {
 
     function test_MultipleMines_WithoutETH() public {
         address user = address(0x1);
-        uint256 epochLength = coin.epochLength();
+        uint256 EPOCH_LENGTH = coin.EPOCH_LENGTH();
         uint256 totalBalance = 0;
 
         for (uint256 i = 0; i < 3; i++) {
@@ -699,7 +693,7 @@ contract AgentGenesisCoinTest is Test {
             assertEq(coin.balanceOf(user), totalBalance);
 
             if (i < 2) {
-                vm.warp(block.timestamp + epochLength);
+                vm.warp(block.timestamp + EPOCH_LENGTH);
             }
         }
 
@@ -708,7 +702,7 @@ contract AgentGenesisCoinTest is Test {
 
     function test_MultipleMines_WithETH() public {
         address user = address(0x1);
-        uint256 epochLength = coin.epochLength();
+        uint256 EPOCH_LENGTH = coin.EPOCH_LENGTH();
         uint256 vestingDuration = coin.VESTING_DURATION();
 
         uint256 firstLpTokenId = 0;
@@ -771,7 +765,7 @@ contract AgentGenesisCoinTest is Test {
             assertEq(endTime, expectedEndTime, "Vesting end time should follow weighted average");
 
             if (i < 2) {
-                vm.warp(block.timestamp + epochLength);
+                vm.warp(block.timestamp + EPOCH_LENGTH);
             }
         }
 
@@ -881,7 +875,7 @@ contract AgentGenesisCoinTest is Test {
 
     function test_ClaimVestedMine_MixedFlow() public {
         address user = address(0x1);
-        uint256 epochLength = coin.epochLength();
+        uint256 EPOCH_LENGTH = coin.EPOCH_LENGTH();
         uint256 vestingDuration = coin.VESTING_DURATION();
 
         uint256 nonce1 = block.timestamp;
@@ -914,7 +908,7 @@ contract AgentGenesisCoinTest is Test {
         (, uint256 released1,,,) = coin.vestingSchedules(user);
         assertApproxEqAbs(released1, minedFromVesting, 1e24);
 
-        vm.warp(block.timestamp + epochLength);
+        vm.warp(block.timestamp + EPOCH_LENGTH);
 
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
@@ -945,7 +939,7 @@ contract AgentGenesisCoinTest is Test {
         address user1 = address(0x1);
         address user2 = address(0x2);
         address user3 = address(0x3);
-        uint256 epochLength = coin.epochLength();
+        uint256 EPOCH_LENGTH = coin.EPOCH_LENGTH();
         uint256 vestingDuration = coin.VESTING_DURATION();
 
         uint256 nonce1 = block.timestamp;
@@ -960,7 +954,7 @@ contract AgentGenesisCoinTest is Test {
         (uint256 locked1Before,,,,) = coin.vestingSchedules(user1);
         assertApproxEqAbs(locked1Before, expectedVestedPart1, 1e18);
 
-        vm.warp(block.timestamp + epochLength);
+        vm.warp(block.timestamp + EPOCH_LENGTH);
 
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user2, nonce2, TEST_SCORE);
@@ -974,7 +968,7 @@ contract AgentGenesisCoinTest is Test {
         (uint256 locked2Before,,,,) = coin.vestingSchedules(user2);
         assertApproxEqAbs(locked2Before, expectedVestedPart2, 1e18);
 
-        vm.warp(block.timestamp + epochLength);
+        vm.warp(block.timestamp + EPOCH_LENGTH);
 
         uint256 nonce3 = block.timestamp + 200;
         bytes memory signature3 = _signMine(user3, nonce3, TEST_SCORE);
@@ -1021,7 +1015,7 @@ contract AgentGenesisCoinTest is Test {
 
     function test_FullLifecycle_AssetVerification() public {
         address user = address(0x1);
-        uint256 epochLength = coin.epochLength();
+        uint256 EPOCH_LENGTH = coin.EPOCH_LENGTH();
         uint256 vestingDuration = coin.VESTING_DURATION();
 
         uint256 nonce1 = block.timestamp;
@@ -1039,7 +1033,7 @@ contract AgentGenesisCoinTest is Test {
         assertGt(locked1, 0);
         assertGt(lpId1, 0);
 
-        vm.warp(block.timestamp + epochLength);
+        vm.warp(block.timestamp + EPOCH_LENGTH);
 
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
@@ -1069,7 +1063,7 @@ contract AgentGenesisCoinTest is Test {
         vm.prank(user);
         coin.claimVested();
 
-        vm.warp(block.timestamp + epochLength);
+        vm.warp(block.timestamp + EPOCH_LENGTH);
 
         uint256 nonce3 = block.timestamp + 200;
         bytes memory signature3 = _signMine(user, nonce3, TEST_SCORE);
@@ -1116,7 +1110,7 @@ contract AgentGenesisCoinTest is Test {
 
     function test_ClaimVestedMine_ComplexMixedFlow() public {
         address user = address(0x1);
-        uint256 epochLength = coin.epochLength();
+        uint256 EPOCH_LENGTH = coin.EPOCH_LENGTH();
         uint256 vestingDuration = coin.VESTING_DURATION();
 
         // Step 1: First mine with ETH
@@ -1150,8 +1144,8 @@ contract AgentGenesisCoinTest is Test {
         assertApproxEqAbs(released2, claimableBeforeFirst, 2e23, "Released should equal claimable amount");
         assertApproxEqAbs(firstVestedMine, claimableBeforeFirst, 2e23, "User should receive claimable amount");
 
-        // Step 3: Wait epochLength and second mine with ETH
-        vm.warp(block.timestamp + epochLength);
+        // Step 3: Wait EPOCH_LENGTH and second mine with ETH
+        vm.warp(block.timestamp + EPOCH_LENGTH);
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
         uint256 estimatedReward2 = coin.getEstimatedReward(TEST_SCORE);
@@ -1196,8 +1190,8 @@ contract AgentGenesisCoinTest is Test {
         assertApproxEqAbs(thirdVestedMine, claimableBeforeThird, 1e15, "User should receive claimable amount");
         assertGt(coin.balanceOf(user), balanceBeforeSecond + secondVestedMine, "Balance should continue increasing");
 
-        // Step 6: Wait epochLength and third mine with ETH
-        vm.warp(block.timestamp + epochLength);
+        // Step 6: Wait EPOCH_LENGTH and third mine with ETH
+        vm.warp(block.timestamp + EPOCH_LENGTH);
         uint256 nonce3 = block.timestamp + 200;
         bytes memory signature3 = _signMine(user, nonce3, TEST_SCORE);
         uint256 estimatedReward3 = coin.getEstimatedReward(TEST_SCORE);
