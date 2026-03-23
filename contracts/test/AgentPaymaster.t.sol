@@ -29,10 +29,9 @@ contract AgentPaymasterTest is Test {
 
         // Deploy mocked dependencies
         address mockPm = address(new MockPositionManager());
-        address mockLz = address(new MockEndpoint());
 
         // Deploy coin
-        coin = new AgentGenesisCoin(signer, mockPm, mockLz);
+        coin = new AgentGenesisCoin(signer, mockPm);
 
         // Deploy paymaster harness
         paymaster = new AgentPaymasterHarness(IEntryPoint(entryPoint), address(coin));
@@ -154,8 +153,4 @@ contract MockPositionManager {
     function vault() external pure returns (address) {
         return address(0x111);
     }
-}
-
-contract MockEndpoint {
-    function setDelegate(address) external {}
 }

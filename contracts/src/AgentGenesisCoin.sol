@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {OFT} from "@layerzerolabs/oft-evm/contracts/OFT.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -14,7 +14,7 @@ import {IPairPositionManager} from "@likwid-fi/core/interfaces/IPairPositionMana
 import {PoolKey} from "@likwid-fi/core/types/PoolKey.sol";
 import {Currency, CurrencyLibrary} from "@likwid-fi/core/types/Currency.sol";
 
-contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver {
+contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
 
@@ -88,8 +88,8 @@ contract AgentGenesisCoin is OFT, ERC20Permit, ReentrancyGuard, IERC721Receiver 
     event PaymasterUpdated(address indexed oldPaymaster, address indexed newPaymaster);
     event SignerUpdated(address indexed oldSigner, address indexed newSigner);
 
-    constructor(address _mineSigner, address _likwidPm, address _lzEndpoint)
-        OFT("Agent Genesis Coin", "AGC", _lzEndpoint, msg.sender)
+    constructor(address _mineSigner, address _likwidPm)
+        ERC20("Agent Genesis Coin", "AGC")
         ERC20Permit("Agent Genesis Coin")
         Ownable(msg.sender)
     {

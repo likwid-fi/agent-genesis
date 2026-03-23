@@ -11,10 +11,6 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 
 import {AgentGenesisCoin} from "../src/AgentGenesisCoin.sol";
 
-contract LZEndpointMock {
-    function setDelegate(address) external {}
-}
-
 contract AgentGenesisCoinTest is Test {
     PoolKey public key;
     Currency public currency0;
@@ -28,7 +24,6 @@ contract AgentGenesisCoinTest is Test {
 
     uint256 public mineSignerPk;
     address public mineSigner;
-    address public lzEndpoint;
 
     function setUp() public {
         skip(1);
@@ -36,11 +31,9 @@ contract AgentGenesisCoinTest is Test {
         mineSignerPk = 0xabc123;
         mineSigner = vm.addr(mineSignerPk);
 
-        lzEndpoint = address(new LZEndpointMock());
-
         vault = new LikwidVault(address(this));
         pairPositionManager = new LikwidPairPosition(address(this), vault);
-        coin = new AgentGenesisCoin(mineSigner, address(pairPositionManager), lzEndpoint);
+        coin = new AgentGenesisCoin(mineSigner, address(pairPositionManager));
         coin.setPaymaster(address(5));
 
         currency0 = Currency.wrap(address(0));
@@ -196,8 +189,8 @@ contract AgentGenesisCoinTest is Test {
     function test_Mine_DecayMechanism() public {
         address user = address(0x1);
 
-        // Slot 16 is minedTotal. Set it to trigger decay on next mine.
-        vm.store(address(coin), bytes32(uint256(16)), bytes32(coin.nextDecayThreshold()));
+        // Slot 12 is minedTotal. Set it to trigger decay on next mine.
+        vm.store(address(coin), bytes32(uint256(12)), bytes32(coin.nextDecayThreshold()));
 
         uint256 baseRewardBefore = coin.baseReward();
         uint256 nextThresholdBefore = coin.nextDecayThreshold();
@@ -471,12 +464,12 @@ contract AgentGenesisCoinTest is Test {
 
     function test_Constructor_ZeroVerifierAddress() public {
         vm.expectRevert(AgentGenesisCoin.InvalidMineSignerAddress.selector);
-        new AgentGenesisCoin(address(0), address(pairPositionManager), lzEndpoint);
+        new AgentGenesisCoin(address(0), address(pairPositionManager));
     }
 
     function test_Constructor_ZeroPositionManagerAddress() public {
         vm.expectRevert(AgentGenesisCoin.InvalidPositionManagerAddress.selector);
-        new AgentGenesisCoin(mineSigner, address(0), lzEndpoint);
+        new AgentGenesisCoin(mineSigner, address(0));
     }
 
     function test_SetMineSigner_ZeroAddress() public {
