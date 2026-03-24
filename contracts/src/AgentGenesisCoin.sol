@@ -40,8 +40,8 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
     uint256 public constant ECOSYSTEM_FUND_ALLOCATION = 3_150_000_000 ether; // 15%
     uint256 public constant MINING_ALLOCATION = 15_750_000_000 ether; // 75%
 
-    uint256 public constant DEFAULT_LAST_SCORE = 100; // Default score for first-time miners to prevent zero rewards
-    uint256 public constant MAX_SCORE = 100; // Maximum score per mine
+    uint256 public constant DEFAULT_LAST_SCORE = 100000; // Default score for first-time miners to prevent zero rewards
+    uint256 public constant MAX_SCORE = 1000; // Maximum score per mine
     uint256 public constant DECAY_RATE = 999; // 99.9%
     uint256 public constant VESTING_DURATION = 83 days;
     uint256 public constant ECOSYSTEM_VESTING_DURATION = 900 days;
