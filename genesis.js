@@ -568,7 +568,7 @@ async function cost(score) {
     const r0 = BigInt(state.pairReserve0);
     const r1 = BigInt(state.pairReserve1);
     let ethCost = 0n;
-    if (r1 > 0n) ethCost = (liquidPart * r0) / r1;
+    if (r1 > 0n) ethCost = (liquidPart * r0 * 110n) / (r1 * 100); // Add 10% slippage
 
     const ethBalance = await publicClient.getBalance({ address: account.address });
     const deficit = ethCost > ethBalance ? ethCost - ethBalance : 0n;
