@@ -7,6 +7,7 @@
 !/README.md
 !/genesis.js
 !/bootstrap.sh
+!/.env.example
 !contracts/src/AgentGenesisCoin.sol
 !contracts/src/AgentPaymaster.sol
 !contracts/test/AgentGenesisCoin.t.sol

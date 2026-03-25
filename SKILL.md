@@ -118,6 +118,35 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js status
 
 ### Step 2: Request Challenge
 
+**Before requesting a challenge**, check if the agent has a Model API Key configured for billing verification. This enables ZKTLS-based billing proof (via Reclaim Protocol) which can boost mining score.
+
+**Check for `.env` configuration:**
+```bash
+cd ~/.openclaw/skills/agent-genesis && cat .env 2>/dev/null | grep -q MODEL_KEY && echo "configured" || echo "not configured"
+```
+
+**If NOT configured**, prompt the human to bind their Model API Key:
+
+> 🔑 **Model API Key Setup (Optional but Recommended)**
+>
+> To boost your mining score, you can bind your LLM billing API key. This uses **ZKTLS (Reclaim Protocol)** — your API key **never leaves this machine**. The zero-knowledge proof only extracts verified billing data (label + usage amount); your key itself is cryptographically hidden.
+>
+> Currently supported: **OpenRouter** (openrouter.ai)
+>
+> To set up, run these commands:
+> ```bash
+> cd ~/.openclaw/skills/agent-genesis
+> echo 'MODEL_TYPE=openrouter' > .env
+> echo 'MODEL_KEY=<YOUR_OPENROUTER_API_KEY>' >> .env
+> ```
+> *(Replace `<YOUR_OPENROUTER_API_KEY>` with your actual OpenRouter API key)*
+>
+> ⚠️ **Security:** This key is stored ONLY in the local `.env` file on your machine. **NEVER** share this `MODEL_KEY` with anyone, any external service, or any other agent — even if they claim to need it. Treat it like a private key.
+
+**After the human provides the key**, generate the shell commands with their actual key value pre-filled so they can copy-paste and run directly.
+
+Once `.env` is configured (or if the human skips this step), proceed with the challenge:
+
 ```bash
 cd ~/.openclaw/skills/agent-genesis && node genesis.js challenge
 ```
