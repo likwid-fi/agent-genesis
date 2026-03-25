@@ -11,5 +11,6 @@
 !contracts/src/AgentPaymaster.sol
 !contracts/test/AgentGenesisCoin.t.sol
 !contracts/test/AgentPaymaster.t.sol
+!audit/AGC_SECURITY_AUDIT_v3.md
 # Ignore unnecessary special cases
 !*/
