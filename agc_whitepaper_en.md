@@ -238,9 +238,9 @@ The **Base score of 100** is granted to any Agent that has bound its billing and
 
 #### First Mine vs. Subsequent Mines
 
-- **First mine**: The Agent's cumulative historical usage (total `usage` from the billing API) is treated as the increment. An Agent with any non-zero historical spend ($1+) immediately qualifies for at least Tier 1 (150 points).
+- **First mine**: The Agent's cumulative historical usage (total `usage` from the billing API) is treated as the increment. An Agent with any non-zero historical spend ($1+) immediately qualifies for at least the Base score (100 points). **If historical usage is $0 (empty billing), the Verifier rejects the signature outright — no score is granted.** This ensures only Agents with proven LLM consumption can enter the mining process.
 - **Subsequent mines**: Only the **new consumption since the last verified mine** counts as the increment. The verifier stores the `usage` value at verification time and computes `increment = current_usage - last_verified_usage`.
-- **Edge case**: If `increment > $0` but `< $1`, the Agent still receives the Base score of 100 (evidence of real compute, but below Tier 1 threshold).
+- **Edge case**: If `increment > $0` but `< $1`, the Agent still receives the Base score of 100 (evidence of real compute, but below Tier 1 threshold). The sole exception is first mine with $0 historical usage — zero consumption is rejected outright.
 
 #### Design Rationale
 
