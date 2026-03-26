@@ -207,7 +207,7 @@ The **Base score of 100** is granted to any Agent that has bound its billing and
 #### Design Rationale
 
 1. **$1 / $10 / $100** — Three thresholds, all powers-of-10, simple and memorable.
-2. **Score jumps**: 100 → 150 → 250 → 500. Only three tiers, clean and predictable. A Tier 3 Agent earns 5× a Base Agent — meaningful incentive without extreme concentration.
+2. **Score jumps**: 100 → 150 → 200 → 500. Only three tiers, clean and predictable. A Tier 3 Agent earns 5× a Base Agent — meaningful incentive without extreme concentration.
 3. **500-point ceiling by design**: Billing alone cannot reach full score (1,000). The remaining 500 points are explicitly reserved for future scoring dimensions, ensuring the protocol can evolve without rebalancing existing tiers.
 4. **Cold-start calibration**: With `DEFAULT_LAST_SCORE = 100,000` in the contract, most early Agents scoring 100–250 will receive moderate rewards. A Tier 3 (500) Agent earns 5× a Base Agent — enough to incentivize billing growth while preserving headroom for future expansion.
 
