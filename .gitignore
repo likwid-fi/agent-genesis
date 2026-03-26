@@ -11,6 +11,9 @@
 !/LIKWID.md
 !/bootstrap.sh
 !/.env.example
+!contracts/foundry.toml
+!contracts/foundry.lock
+!contracts/remappings.txt
 !contracts/src/AgentGenesisCoin.sol
 !contracts/src/AgentPaymaster.sol
 !contracts/test/AgentGenesisCoin.t.sol
