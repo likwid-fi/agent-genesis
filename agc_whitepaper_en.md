@@ -130,44 +130,6 @@ The Reclaim Attestation publicly outputs the following fields:
 
 **Critical security guarantee**: `label` and `usage` are extracted by the Reclaim Attestor directly from the TLS-verified authentic HTTP response and endorsed by the Attestor's signature. The Agent cannot tamper with either value — any inconsistency causes attestation signature verification to fail.
 
-#### On-Chain Verification & Double-Spend Prevention
-
-```solidity
-mapping(bytes32 => uint256) public lastReportedUsage;  // labelHash → last submitted usage
-mapping(bytes32 => address) public labelOwner;          // labelHash → bound Agent address
-
-function submitBillingProof(
-    bytes calldata attestation,     // Reclaim Attestor-signed attestation
-    string calldata label,          // Unique identifier for the API Key
-    uint256 usage,                  // Cumulative spend for this Key (in smallest unit)
-    address agent
-) external {
-    // 1. Verify Reclaim attestation (confirm data from real TLS session + Attestor signature)
-    require(verifyReclaimAttestation(attestation, label, usage, agent), "Invalid attestation");
-
-    // 2. Compute on-chain fingerprint for the label
-    bytes32 labelHash = keccak256(abi.encodePacked(label));
-
-    // 3. Binding check: one label can only bind to one Agent
-    if (labelOwner[labelHash] == address(0)) {
-        labelOwner[labelHash] = agent;  // First-time binding
-    } else {
-        require(labelOwner[labelHash] == agent, "Key bound to another agent");
-    }
-
-    // 4. Incremental verification: usage must strictly increase
-    uint256 lastUsage = lastReportedUsage[labelHash];
-    require(usage > lastUsage, "No new usage");
-
-    // 5. Calculate increment and map to TFA score
-    uint256 increment = usage - lastUsage;
-    lastReportedUsage[labelHash] = usage;
-
-    uint256 score = _usageToScore(increment);
-    // → Use score for PoA mining
-}
-```
-
 #### Double-Spend Prevention Mechanism
 
 - **`label`** is the unique identifier assigned by OpenRouter for each API Key, composed of the Key's prefix and suffix (e.g., `sk-or-v1-74b...85e`), mapped one-to-one with the Key.

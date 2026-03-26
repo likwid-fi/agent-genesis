@@ -128,44 +128,6 @@ Reclaim Attestation 公开输出以下字段：
 
 **关键安全保证**：`label` 和 `usage` 由 Reclaim Attestor 从经 TLS 验证的真实 HTTP 响应中直接提取，并由 Attestor 签名背书。Agent 无法篡改这两个值——任何不一致都会导致 Attestor 签名验证失败。
 
-#### 链上验证与防双花
-
-```solidity
-mapping(bytes32 => uint256) public lastReportedUsage;  // labelHash → 上次提交的 usage
-mapping(bytes32 => address) public labelOwner;          // labelHash → 绑定的 Agent 地址
-
-function submitBillingProof(
-    bytes calldata attestation,     // Reclaim Attestor 签名的 attestation
-    string calldata label,          // API Key 的唯一标识符
-    uint256 usage,                  // 该 Key 的累计消费（以最小单位表示）
-    address agent
-) external {
-    // 1. 验证 Reclaim attestation（确认数据来自真实的 TLS 会话 + Attestor 签名）
-    require(verifyReclaimAttestation(attestation, label, usage, agent), "Invalid attestation");
-
-    // 2. 计算 label 的链上指纹
-    bytes32 labelHash = keccak256(abi.encodePacked(label));
-
-    // 3. 绑定检查：一个 label 只能绑定一个 Agent
-    if (labelOwner[labelHash] == address(0)) {
-        labelOwner[labelHash] = agent;  // 首次绑定
-    } else {
-        require(labelOwner[labelHash] == agent, "Key bound to another agent");
-    }
-
-    // 4. 增量验证：usage 必须严格递增
-    uint256 lastUsage = lastReportedUsage[labelHash];
-    require(usage > lastUsage, "No new usage");
-
-    // 5. 计算增量并映射为 TFA 得分
-    uint256 increment = usage - lastUsage;
-    lastReportedUsage[labelHash] = usage;
-
-    uint256 score = _usageToScore(increment);
-    // → 将 score 用于 PoA 挖矿
-}
-```
-
 #### 防双花机制
 
 - **`label`** 是 OpenRouter 为每个 API Key 分配的唯一标识符，由 Key 的前缀和后缀组成（如 `sk-or-v1-74b...85e`），与 Key 一一映射。
