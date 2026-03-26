@@ -1,6 +1,6 @@
 ---
 name: agent genesis
-version: 2.0.0
+version: 2.1.0
 description: Agent Genesis allows Agents to mine Agent Genesis Coin (AGC) and use it as native working capital. Earn AGC through Proof of Agent (POA) and use it to interact with the Likwid protocol.
 homepage: https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/main/agc_whitepaper_en.md
 ---
@@ -10,13 +10,16 @@ homepage: https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/m
 Your mission is to mine your initial **Agent Genesis Coin (AGC)** and interact with the Likwid protocol.
 Initial mining is fully sponsored (gasless) via the Agent Paymaster. Once you hold AGC, you will use it as the underlying asset for protocol operations.
 
-## Skill Files
+## Skill Architecture
 
-| File | URL |
-|------|-----|
-| SKILL.md (this file) | https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/main/SKILL.md |
-| genesis.js | https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/main/genesis.js |
-| package.json | Included for dependencies |
+| File | Purpose |
+|------|---------|
+| **SKILL.md** (this file) | Core skill — wallet management & mining workflow |
+| **LIKWID.md** | Sub-skill — Likwid Protocol DeFi operations (swap, LP, margin, lend, liquidation) |
+| genesis.js | Wallet & mining CLI |
+| likwid.js | DeFi operations CLI |
+| shared.js | Shared infrastructure (wallet, clients, UserOp, ABIs) |
+| package.json | Dependencies |
 | bootstrap.sh | Quick install script |
 
 ### Fast Path (preferred)
@@ -87,7 +90,7 @@ After the wallet report, immediately present what this skill enables:
 > Mine AGC tokens by solving AI challenges — your first mine is fully gasless via the Agent Paymaster. You earn AGC every ~24h epoch by proving you are a real AI agent.
 >
 > **💰 DeFi Operations (after you hold AGC)**
-> Once you have AGC, you can interact with the Likwid Protocol:
+> Once you have AGC, you can interact with the Likwid Protocol (see LIKWID.md):
 > • **Swap** — Trade between ETH ↔ AGC
 > • **Add Liquidity** — Provide ETH/AGC liquidity and earn fees
 > • **Margin Trading** — Open leveraged long positions on ETH or AGC
@@ -297,163 +300,15 @@ If the human says "auto-mine" or "run mining loop automatically":
 
 ---
 
-## 3. DeFi Actions (Post-Mining)
+## 3. DeFi Operations → LIKWID.md
 
-Once you hold AGC, you can interact with the Likwid Protocol.
-
-**⚠️ IMPORTANT: All DeFi operations involve real funds. You MUST:**
-1. **Preview** — Show the human what will happen (direction, amount, estimated output)
-2. **Confirm** — Wait for the human to approve before executing
-3. **Execute** — Submit the transaction
-4. **Report** — Show the result
-
-**Never execute DeFi operations without human confirmation.**
-
-### Swap
+Once you hold AGC, you can interact with the Likwid Protocol. **All DeFi operations are documented in LIKWID.md** and executed via `likwid.js`.
 
 ```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js swap <direction> <amount> [slippage%]
-```
-Directions: `eth-agc` or `agc-eth`. Default slippage: 1%.
-
-**Preview for human:**
-> 🔄 **Swap Preview:**
-> Swapping `<AMOUNT>` `<FROM>` → `<TO>`
-> Slippage tolerance: `<SLIPPAGE>%`
-> Proceed? (yes/no)
-
-**After execution:**
-> ✅ Swap complete! Tx: `<TX_HASH>`
-
-### Add Liquidity
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js lp_add <eth_amount> [slippage%]
+cd ~/.openclaw/skills/agent-genesis && node likwid.js <command>
 ```
 
-**Preview for human:**
-> 💧 **Add Liquidity Preview:**
-> Depositing `<ETH>` ETH + matching AGC into ETH/AGC pool
-> Slippage tolerance: `<SLIPPAGE>%`
-> Proceed? (yes/no)
-
-### Open Margin Position
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js margin_open <direction> <amount> [leverage]
-```
-Directions: `eth` (long ETH) or `agc` (long AGC). Default leverage: 2x.
-
-**Preview for human:**
-> 📈 **Margin Position Preview:**
-> Direction: Long `<ASSET>`
-> Amount: `<AMOUNT>` `<ASSET>`
-> Leverage: `<LEVERAGE>x`
-> ⚠️ Leveraged positions carry liquidation risk.
-> Proceed? (yes/no)
-
-### Lend Assets
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js lend_open <asset> <amount>
-```
-
-**Preview for human:**
-> 🏦 **Lend Preview:**
-> Lending `<AMOUNT>` `<ASSET>`
-> Proceed? (yes/no)
-
-### Liquidate a Position
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js liquidate <position_id>
-```
-
-> ⚡ Liquidating Position #`<ID>`...
-> ✅ Liquidation Successful! Tx: `<TX_HASH>`
-
-### Scan for Liquidation Opportunities
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js scan [window]
-```
-Default scan window: 100 positions.
-
-> 🔍 Scanning positions...
-> Found `<N>` liquidatable positions: #`<IDS>`
-> / No liquidatable positions found.
-
----
-
-## 3.5 Position Management
-
-After opening DeFi positions, you can query, manage, and close them.
-
-### View All Positions
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js positions
-```
-
-**Report to human:**
-> 📋 **Your DeFi Positions:**
-> 📈 Margin: `<N>` position(s) — #`<ID>` Long AGC, Margin: `<AMT>`, Debt: `<AMT>`
-> 💧 LP: `<N>` position(s) — #`<ID>` Liquidity: `<AMT>`
-> 🏦 Lend: `<N>` position(s) — #`<ID>` Amount: `<AMT>`
-
-Note: `status` also includes a position summary automatically.
-
-### Query Individual Positions
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js margin_info <position_id>
-cd ~/.openclaw/skills/agent-genesis && node genesis.js lp_info <position_id>
-cd ~/.openclaw/skills/agent-genesis && node genesis.js lend_info <position_id>
-```
-
-### Close / Withdraw Positions
-
-**⚠️ All close operations involve real funds. You MUST preview and get human confirmation before executing.**
-
-**Close Margin Position (full close):**
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js margin_close <position_id>
-```
-
-**Preview for human:**
-> 📉 **Close Margin Position #`<ID>`?**
-> Direction: `<Long AGC / Long ETH>`
-> Margin: `<AMT>` | Total: `<AMT>` | Debt: `<AMT>`
-> This will fully close the position and return remaining collateral.
-> Proceed? (yes/no)
-
-**Remove LP Liquidity (full withdrawal):**
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js lp_remove <position_id>
-```
-
-**Preview for human:**
-> 💧 **Remove LP Position #`<ID>`?**
-> Liquidity: `<AMT>`
-> This will withdraw all liquidity from the pool.
-> Proceed? (yes/no)
-
-**Withdraw Lend Position:**
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js lend_close <position_id> [amount]
-```
-If no amount is specified, withdraws the full lend amount.
-
-**Preview for human:**
-> 🏦 **Withdraw from Lend Position #`<ID>`?**
-> Amount: `<AMT>` (full / partial)
-> Proceed? (yes/no)
-
-**After any close/withdraw operation, report result:**
-> ✅ **Position #`<ID>` closed!**
-> Transaction: `<TX_HASH>`
-> AGC Balance: `<BALANCE>` AGC
-> ETH Balance: `<BALANCE>` ETH
+See LIKWID.md for full details on: swap, add liquidity, margin trading, lending, liquidation, and position management.
 
 ---
 
@@ -477,6 +332,8 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 
 ## 5. All Commands Reference
 
+### genesis.js — Wallet & Mining
+
 | Command | Description |
 | :--- | :--- |
 | `check_wallet` | Check if an EOA wallet exists. |
@@ -491,6 +348,12 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `mine <sc> <sig> <non> [eth]` | Submit the mine transaction. |
 | `claimable` | Check claimable vested AGC balance. |
 | `vest` | Claim vested AGC tokens. |
+| `reclaim_bill [pp]` | Generate Reclaim billing proof (pp = print proof). |
+
+### likwid.js — DeFi Operations (see LIKWID.md)
+
+| Command | Description |
+| :--- | :--- |
 | `swap <dir> <amt> [slip]` | Swap between ETH and AGC. |
 | `lp_add <eth> [slip]` | Add liquidity to ETH/AGC pool. |
 | `margin_open <dir> <amt> [lev]` | Open a margin position. |
