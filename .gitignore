@@ -6,6 +6,9 @@
 !/package.json
 !/README.md
 !/genesis.js
+!/shared.js
+!/likwid.js
+!/LIKWID.md
 !/bootstrap.sh
 !/.env.example
 !contracts/src/AgentGenesisCoin.sol
