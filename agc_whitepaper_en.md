@@ -36,11 +36,14 @@ The higher the composite score obtained through the TFA system, the greater the 
 
 The current PoA implementation is a Minimum Viable Product (MVP) with the following flow:
 
-1. The Agent requests a challenge (LLM semantic puzzle) from a centralized verifier server;
-2. The Agent solves the puzzle and submits the answer to the verifier;
-3. The verifier returns a score, nonce, and signature;
-4. The Agent submits the signature on-chain, where the contract verifies it originates from `mineSigner`;
-5. Upon successful verification, mining is executed.
+1. The Agent binds its LLM billing account (via zkTLS proof) to its on-chain address;
+2. The Agent requests a challenge (LLM semantic puzzle) from the verifier server;
+3. The Agent solves the puzzle and submits the answer to the verifier;
+4. The verifier pulls the Agent's latest billing data, calculates the TFA score (based on billing increment tiers), and returns the score, nonce, and signature;
+5. The Agent submits the signature on-chain, where the contract verifies it originates from `mineSigner`;
+6. Upon successful verification, mining is executed.
+
+**⚠️ Mandatory Prerequisite**: Billing binding (Step 1) is a hard requirement. Agents that have not bound a valid billing account cannot proceed to challenge or verify, and the verifier will reject their requests with a 403 error.
 
 **⚠️ Transparency Statement**: The current version of PoA relies on a centralized verifier server and a replaceable `mineSigner`. This means that who can mine and what score they receive is effectively determined by the centralized server. **This is the highest-priority issue on our decentralization roadmap.**
 
@@ -198,6 +201,54 @@ The protocol adopts **Reclaim Protocol** as the zkTLS middleware infrastructure:
 
 Through zkTLS + Reclaim Protocol, ERC-8004 Billing Authentication achieves a **triple security guarantee**: the Agent's API Key never leaves the local device (the Attestor can only see the response body, not the Key in the request header), billing data is rendered unforgeable by the dual guarantees of the TLS protocol and Attestor signature, and the on-chain `label` binding combined with incremental verification completely eliminates the possibility of double-spending.
 
+### 2.3 TFA Score Design: Billing-Based Tiered Scoring
+
+The TFA (Tools for Agent) system assigns each Agent a score between **0 and 1,000** (`MAX_SCORE = 1000`) based on its verified LLM billing data. This score directly determines the Agent's mining reward share in each Epoch.
+
+#### Mandatory Prerequisite: Billing Binding
+
+Before an Agent can execute the `challenge → verify → mine` flow, it **must first bind a valid LLM billing account**. Without billing binding, the verifier rejects all challenge requests.
+
+**Currently, the protocol exclusively supports [OpenRouter.ai](https://openrouter.ai) billing.** This is because OpenRouter's `GET /api/v1/key` endpoint returns a `label` field — a unique identifier mapped one-to-one with each API Key — in the response body. This unique identifier is the critical foundation that enables the entire zkTLS verification chain:
+
+1. **Local-only API Key**: The Agent queries its billing locally; the API Key never leaves the device (the Reclaim Attestor cannot read request headers).
+2. **Tamper-proof proof**: The `label` and `usage` fields are extracted from a TLS-verified authentic response and signed by the Attestor — unforgeable.
+3. **Non-replayable (anti-double-spend)**: The `label` serves as the on-chain fingerprint (`labelHash`). Combined with strictly-increasing `usage` checks, the same billing data can never be submitted twice.
+
+Without a unique per-key identifier in the response body, none of these guarantees hold. Most other LLM providers (e.g., OpenAI, Anthropic) do not expose such an identifier in their billing API responses, making them currently unsuitable for zkTLS-based billing authentication. As providers adopt similar patterns, the protocol will extend support accordingly.
+
+#### Score Formula
+
+$$
+Score = Base\ (100) + Billing\ Bonus\ (0 \sim 400) + Future\ Dimensions\ (reserved,\ 0 \sim 500)
+$$
+
+The **Base score of 100** is granted to any Agent that has bound its billing and successfully passed the LLM challenge. The **Billing Bonus** (max 400) is determined by the consumption increment since the last verified mine:
+
+| Tier | Consumption Increment (USD) | Bonus | Total Score | Description |
+|:---|:---|:---:|:---:|:---|
+| **Base** | $0 (bound, but no new spend) | +0 | **100** | Passed challenge + has bound billing |
+| **Tier 1** | $1 – $10 | +50 | **150** | Small increment |
+| **Tier 2** | $10 – $100 | +150 | **250** | Medium increment |
+| **Tier 3** | ≥ $100 | +400 | **500** | Large increment (billing cap) |
+
+**Boundary rules**: Left-closed, right-open intervals. E.g., exactly $10 falls into Tier 2.
+
+> **Reserved Headroom (500 points):** The current billing-based scoring caps at 500 out of 1,000. The remaining 500 points are reserved for future scoring dimensions — such as x402 payment activity, cross-protocol interactions, agent reputation, or governance participation — to be introduced via protocol upgrades.
+
+#### First Mine vs. Subsequent Mines
+
+- **First mine**: The Agent's cumulative historical usage (total `usage` from the billing API) is treated as the increment. An Agent with any non-zero historical spend ($1+) immediately qualifies for at least Tier 1 (150 points).
+- **Subsequent mines**: Only the **new consumption since the last verified mine** counts as the increment. The verifier stores the `usage` value at verification time and computes `increment = current_usage - last_verified_usage`.
+- **Edge case**: If `increment > $0` but `< $1`, the Agent still receives the Base score of 100 (evidence of real compute, but below Tier 1 threshold).
+
+#### Design Rationale
+
+1. **$1 / $10 / $100** — Three thresholds, all powers-of-10, simple and memorable.
+2. **Score jumps**: 100 → 150 → 250 → 500. Only three tiers, clean and predictable. A Tier 3 Agent earns 5× a Base Agent — meaningful incentive without extreme concentration.
+3. **500-point ceiling by design**: Billing alone cannot reach full score (1,000). The remaining 500 points are explicitly reserved for future scoring dimensions, ensuring the protocol can evolve without rebalancing existing tiers.
+4. **Cold-start calibration**: With `DEFAULT_LAST_SCORE = 100,000` in the contract, most early Agents scoring 100–250 will receive moderate rewards. A Tier 3 (500) Agent earns 5× a Base Agent — enough to incentivize billing growth while preserving headroom for future expansion.
+
 ---
 
 ## 3. Tokenomics
@@ -247,13 +298,13 @@ $$
 - $BaseReward$: The current base emission amount (following the smooth decay table above), dynamically adjusted by the cascade decay mechanism.
 - $S_{curr}$: The cumulative total score of all participating agents within the current Epoch up to this Mine (**including** the current agent's score).
 - $S_{prev}$: A smoothed difficulty baseline derived from the two preceding Epochs (see calculation rule below).
-- $s_i$: The current agent's individual TFA identity score (**hard-capped at 100**).
+- $s_i$: The current agent's individual TFA identity score (**hard-capped at 1,000**, see §2.3 TFA Score Design).
 
 #### Key Constraints
 
-1. **Individual Score Hard Cap**: $s_i \leq 100$. Any raw TFA score exceeding 100 is truncated, preventing any single transaction from producing uncontrollable system impact.
-2. **Smoothed Difficulty Baseline**: $S_{prev} = \max\!\left(\dfrac{S_{n-1} + S_{n-2}}{2},\ 100\right)$, where $S_{n-1}$ and $S_{n-2}$ are the total cumulative scores of the previous and second-previous Epochs respectively. The two-epoch average acts as a low-pass filter, preventing a single anomalous Epoch (sudden surge or sudden lull) from causing violent rate swings the following day.
-3. **Difficulty Floor**: $S_{prev}$ can never fall below the default value of $100$ (`DEFAULT_LAST_SCORE`). This also serves as the system's cold-start initial value, ensuring a deterministic rate from Day 1: $Rate = BaseReward / 100$.
+1. **Individual Score Hard Cap**: $s_i \leq 1{,}000$ (`MAX_SCORE`). Any raw TFA score exceeding 1,000 is truncated, preventing any single transaction from producing uncontrollable system impact.
+2. **Smoothed Difficulty Baseline**: $S_{prev} = \max\!\left(\dfrac{S_{n-1} + S_{n-2}}{2},\ 100{,}000\right)$, where $S_{n-1}$ and $S_{n-2}$ are the total cumulative scores of the previous and second-previous Epochs respectively. The two-epoch average acts as a low-pass filter, preventing a single anomalous Epoch (sudden surge or sudden lull) from causing violent rate swings the following day.
+3. **Difficulty Floor**: $S_{prev}$ can never fall below the default value of $100{,}000$ (`DEFAULT_LAST_SCORE`). This also serves as the system's cold-start initial value, ensuring a deterministic rate from Day 1: $Rate = BaseReward / 100{,}000$.
 
 #### Two-Phase Game Mechanism
 
@@ -283,25 +334,24 @@ Using `while` (rather than `if`) ensures that a single oversized transaction can
 
 #### Algorithmic Deduction Example
 
-Assume a cold start ($S_{prev} = 100$, `DEFAULT_LAST_SCORE`), $BaseReward = 15{,}750{,}000$.
+Assume a cold start ($S_{prev} = 100{,}000$, `DEFAULT_LAST_SCORE`), $BaseReward = 15{,}750{,}000$.
 
 | Epoch | Action | $s_i$ | $S_{curr}$ | $S_{prev}$ | Phase | Denominator | Single Reward | Accumulated Total |
 |:---|:---|:---:|:---:|:---:|:---:|:---:|:---|:---|
-| **Epoch 1** | Agent A Mine | 1 | 1 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 1 / 100$ = **157,500** | 157,500 |
-| | Agent B Mine | 50 | 51 | 100 | Fixed Rate | 100 | $15{,}750{,}000 \times 50 / 100$ = **7,875,000** | 8,032,500 |
-| | Agent C Mine | 100 | 151 | 100 | Dynamic | 151 | $15{,}750{,}000 \times 100 / 151$ ≈ **10,430,463** | 18,462,963 |
-| | *(Accumulated 18.46M crosses the Stage 1 decay line of 15.75M — cascade decay triggers, BaseReward adjusts downward)* |||||||||
-| | Agent D Mine | 1 | 152 | 100 | Dynamic | 152 | $BaseReward' \times 1 / 152$ ≈ **103,454** | 18,566,417 |
-| | *(24h Epoch ends.* $S_{n-1} = 152$, $S_{n-2} = 100$ *(default))* |||||||||
-| **Epoch 2** | *(New* $S_{prev} = \max((152+100)/2, 100) = 126$ *)* |||||||||
-| | Agent E Mine | 100 | 100 | 126 | Fixed Rate | 126 | $BaseReward' \times 100 / 126$ | ... |
-| | Agent F Mine | 100 | 200 | 126 | Dynamic | 200 | $BaseReward' \times 100 / 200$ | ... |
+| **Epoch 1** | Agent A Mine | 100 | 100 | 100,000 | Fixed Rate | 100,000 | $15{,}750{,}000 \times 100 / 100{,}000$ = **15,750** | 15,750 |
+| | Agent B Mine | 250 | 350 | 100,000 | Fixed Rate | 100,000 | $15{,}750{,}000 \times 250 / 100{,}000$ = **39,375** | 55,125 |
+| | Agent C Mine | 500 | 850 | 100,000 | Fixed Rate | 100,000 | $15{,}750{,}000 \times 500 / 100{,}000$ = **78,750** | 133,875 |
+| | ... *(more Agents mine throughout the day; all within Fixed Rate zone since* $S_{curr} \ll S_{prev}$*)* |||||||||
+| | *(24h Epoch ends.* $S_{n-1} = 85{,}000$, $S_{n-2} = 100{,}000$ *(default))* |||||||||
+| **Epoch 2** | *(New* $S_{prev} = \max((85{,}000+100{,}000)/2, 100{,}000) = 100{,}000$ *)* |||||||||
+| | Agent D Mine | 500 | 500 | 100,000 | Fixed Rate | 100,000 | $BaseReward' \times 500 / 100{,}000$ | ... |
 
 **Key Observations:**
-- **Within the Fixed Rate Zone**: Agent B (score=50) earns exactly 50× Agent A (score=1) → pure compute competition with zero timing advantage.
-- **Entering the Dynamic Zone**: Agent C (score=100) pushes $S_{curr}$ past the threshold with the highest score, and subsequent Agent D faces significantly higher difficulty.
-- **Cross-Epoch Smoothing**: Epoch 2's $S_{prev}$ is not simply 152, but $(152+100)/2 = 126$, preventing a single day of abnormally high activity from causing a cliff-drop in the next day's rate.
-- **Natural Difficulty Fallback**: If an Epoch sees extremely low participation ($S_{curr}$ is very small), subsequent $S_{prev}$ will smoothly decrease via the averaging mechanism, but never below 100, ensuring the system always maintains a deterministic minimum rate.
+- **Cold-start fairness**: With `DEFAULT_LAST_SCORE = 100,000`, early Epochs remain in the Fixed Rate zone for a long time, ensuring fair and predictable rewards for pioneering Agents.
+- **Within the Fixed Rate Zone**: Agent C (score=500, Tier 3 billing cap) earns exactly 5× Agent A (score=100, Base) → pure billing-competition with zero timing advantage.
+- **Score tiers matter**: A Tier 3 Agent (≥$100 spend, score=500) earns 5× a Base Agent (score=100), and 2× a Tier 2 Agent (score=250). This creates strong incentive to maintain real LLM spending. The remaining 500-point headroom ensures future scoring dimensions can further differentiate high-value Agents.
+- **Cross-Epoch Smoothing**: Epoch 2's $S_{prev}$ uses $(85{,}000+100{,}000)/2 = 92{,}500$, floored to 100,000, preventing a low-activity Epoch from destabilizing the next day's rate.
+- **Natural Difficulty Fallback**: If an Epoch sees extremely low participation ($S_{curr}$ is very small), subsequent $S_{prev}$ will smoothly decrease via the averaging mechanism, but never below 100,000, ensuring the system always maintains a deterministic minimum rate.
 
 *Deep Analysis*: The two-phase formula creates a unique game-theoretic structure. Within the historical activity level, the protocol offers fair, transparent, MEV-free fixed-rate mining; once that level is exceeded, a dynamic resistance curve automatically engages, diluting concentrated compute bursts at an accelerating rate. Cascade decay serves as the ultimate safety net, ensuring the token emission curve remains controlled under any extreme scenario. This design focuses agents' entire strategy on improving their TFA scores (i.e., genuine compute contributions) rather than timing games or gas wars.
 
