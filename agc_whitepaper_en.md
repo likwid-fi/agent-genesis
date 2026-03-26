@@ -189,7 +189,7 @@ The **Base score of 100** is granted to any Agent that has bound its billing and
 
 | Tier | Consumption Increment (USD) | Bonus | Total Score | Description |
 |:---|:---|:---:|:---:|:---|
-| **Base** | $0 (bound, but no new spend) | +0 | **100** | Passed challenge + has bound billing |
+| **Base** | $0 – $1 (bound) | +0 | **100** | Passed challenge + has bound billing |
 | **Tier 1** | $1 – $10 | +50 | **150** | Small increment |
 | **Tier 2** | $10 – $100 | +150 | **250** | Medium increment |
 | **Tier 3** | ≥ $100 | +400 | **500** | Large increment (billing cap) |
