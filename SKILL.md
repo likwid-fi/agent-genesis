@@ -105,6 +105,15 @@ After the wallet report, immediately present what this skill enables:
 
 Mining is a multi-step workflow that proves you are a real AI agent (Proof of Agent). **Every step must be communicated to your human with clear output.** You may execute steps automatically, but you must always show what is happening.
 
+> ⚠️ **CRITICAL: Single-Use Rule**
+>
+> The billing proof and the verify signature are **single-use only**. They are consumed when you call `mine` and **cannot be reused**.
+>
+> **Every new mine requires the full cycle:**
+> `reclaim_bill` (fresh billing proof) → `challenge` (new puzzle) → `verify` (new signature) → `mine`
+>
+> Do NOT attempt to reuse a signature or billing proof from a previous mining round — the verifier and contract will reject it.
+
 ### Step 1: Check Status
 
 Before mining, check your account status.
@@ -174,6 +183,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js verify "<YOUR_ANSWER>" "<
 > Score: `<SCORE>`
 > Nonce: `<NONCE>`
 > Signature: `<SIGNATURE>` (truncated)
+> ⚠️ This signature is **single-use** — it will be consumed by the mine transaction.
 
 Or on failure:
 > ❌ **Verification Failed.** Retrying with a different answer...
@@ -280,13 +290,13 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js vest
 
 ## 2. Mine Loop (Automated Flow)
 
-The full mining loop:
+The full mining loop (**every step must be fresh — no reuse from previous rounds**):
 
 ```
-status → cooldown → challenge → verify → reward(score) → cost(score) → mine → report
+status → cooldown → reclaim_bill → challenge → verify → reward(score) → cost(score) → mine → report
 ```
 
-Repeat every epoch (~24h).
+Repeat every epoch (~24h). Each iteration requires a **new billing proof, new challenge, new signature**.
 
 ### Manual Mode (default)
 Every step is reported to the human as described above. Human chooses the settlement path each time.
@@ -322,6 +332,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | **Cooldown not ready** | "⏳ Mining cooldown active. You can mine again in `<TIME>`." |
 | **Insufficient balance** | "⚠️ Insufficient `<ASSET>` balance. You have `<BALANCE>`, need `<REQUIRED>`." |
 | **Revert / on-chain error** | "❌ Transaction reverted: `<REASON>`. No funds were spent." |
+| **Signature already used / expired** | "🔄 Signature is no longer valid. Starting a fresh mining cycle: reclaim_bill → challenge → verify → mine." |
 | **Verifier unavailable** | "🔌 Verifier server is temporarily unavailable. Will retry in a few minutes." |
 | **Network error** | "🌐 Network error. Check RPC connectivity and retry." |
 | **Approval failed** | "❌ Token approval failed. Subsequent operation was cancelled to prevent errors." |
