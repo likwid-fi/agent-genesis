@@ -89,11 +89,14 @@ After the wallet report, immediately present what this skill enables:
 > **⛏️ Mining (Proof of Agent)**
 > Mine AGC tokens by solving AI challenges — your first mine is fully gasless via the Agent Paymaster. You earn AGC every ~24h epoch by proving you are a real AI agent.
 >
+> **🛡️ Hedging (after mining with Full Alignment)**
+> Protect your locked vesting tokens against price drops using Likwid Agent Hedge — swap liquid AGC into ETH and open a short position to offset exposure.
+>
 > **💰 DeFi Operations (after you hold AGC)**
 > Once you have AGC, you can interact with the Likwid Protocol (see LIKWID.md):
 > • **Swap** — Trade between ETH ↔ AGC
 > • **Add Liquidity** — Provide ETH/AGC liquidity and earn fees
-> • **Margin Trading** — Open leveraged long positions on ETH or AGC
+> • **Margin Trading** — Open leveraged long/short positions on AGC
 > • **Lending** — Lend your ETH or AGC to earn interest
 > • **Liquidation** — Scan and liquidate undercollateralized positions for profit
 >
@@ -286,6 +289,54 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js claim
 > 🔓 **Claimed `<AMOUNT>` vested AGC!**
 > Transaction: `<TX_HASH>`
 
+### Step 8: Hedge Vesting Exposure (Optional — Advanced Strategy)
+
+After mining with Full Alignment, 83% of your AGC is locked in a vesting schedule (83 days linear release). This creates price exposure — if AGC drops, your locked tokens lose value.
+
+**Likwid Agent Hedge** (Whitepaper §6) protects against this by shorting AGC:
+
+1. Swap liquid AGC → ETH
+2. Use ETH as collateral to open a Short AGC position on Likwid
+3. If AGC price drops, the short profit offsets vesting value loss
+
+> ⚠️ **Key Rule**: Shorting AGC requires **ETH** as collateral (not AGC). The hedge command handles the AGC→ETH swap automatically.
+
+**Check hedging opportunity:**
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js hedge_status
+```
+
+**Report to human:**
+> 🛡️ **Hedge Analysis**
+> Liquid AGC: `<LIQUID>` AGC
+> Locked (exposure): `<REMAINING>` AGC (`<DAYS>` days left)
+>
+> **Coverage at different leverage:**
+> | Leverage | Short Notional | Coverage |
+> |---|---|---|
+> | 2x | `<VAL>` ETH | `<PCT>`% |
+> | 3x | `<VAL>` ETH | `<PCT>`% |
+> | 5x | `<VAL>` ETH | `<PCT>`% |
+>
+> ⚠️ Higher leverage = more coverage but higher liquidation risk.
+> Recommended: **2-3x** for conservative hedging.
+
+**Execute hedge (after human confirms):**
+```bash
+cd ~/.openclaw/skills/agent-genesis && node genesis.js hedge <agc_amount> [leverage] [slippage]
+```
+
+**Report to human:**
+> 🛡️ **Hedge Executed!**
+> Swapped: `<AGC>` AGC → `<ETH>` ETH
+> Opened: Short AGC @ `<LEV>`x (`<ETH>` ETH collateral)
+> Coverage: ~`<PCT>`% of remaining vesting
+
+**Manage the hedge position** via `likwid.js`:
+- `positions` — view all positions including the short
+- `margin_info <id>` — check short health
+- `margin_close <id>` — close when no longer needed
+
 ---
 
 ## 2. Mine Loop (Automated Flow)
@@ -360,6 +411,8 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `claimable` | Check claimable vested AGC balance. |
 | `claim` | Claim vested AGC tokens. |
 | `reclaim_bill [pp]` | Generate Reclaim billing proof (pp = print proof). |
+| `hedge_status` | Analyze hedging opportunity (vesting exposure, coverage simulation). |
+| `hedge <agc> [lev] [slip]` | Execute hedge: swap AGC→ETH, then open Short AGC position. |
 
 ### likwid.js — DeFi Operations (see LIKWID.md)
 

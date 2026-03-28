@@ -11,6 +11,7 @@ const {
   AGC_TOKEN_ADDRESS,
   AGENT_PAYMASTER_ADDRESS,
   LIKWID_HELPER_ADDRESS,
+  POOL_KEY,
   POOL_ID,
   WALLET_FILE,
   // ABIs
@@ -24,6 +25,7 @@ const {
   // UserOp
   runUserOp,
   // Helpers
+  getApprovalCall,
   formatError,
   formatHumanSeconds,
   loadEnvConfig,
@@ -504,6 +506,336 @@ async function mine(scoreStr, signature, nonceStr, ethAmountStr) {
   await runUserOp(account, mineCall, "Mine AGC");
 }
 
+// ======================= HEDGING =======================
+
+async function hedge_status() {
+  const signer = getWalletInstance();
+  if (!signer) return formatError("No wallet found. Run create_wallet first.");
+  const account = await getSmartAccount(signer);
+
+  // Get balances
+  const [ethBal, agcBal] = await Promise.all([
+    publicClient.getBalance({ address: account.address }),
+    publicClient.readContract({
+      address: AGC_TOKEN_ADDRESS,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [account.address],
+    }),
+  ]);
+
+  // Get vesting info
+  let vestInfo = null;
+  try {
+    const v = await publicClient.readContract({
+      address: AGC_TOKEN_ADDRESS,
+      abi: parseAbi([
+        "function vestingSchedules(address) view returns (uint256 totalLocked, uint256 released, uint256 startTime, uint256 endTime, uint256 lpTokenId)",
+      ]),
+      functionName: "vestingSchedules",
+      args: [account.address],
+    });
+    if (v[0] > 0n) {
+      vestInfo = {
+        totalLocked: v[0],
+        released: v[1],
+        remaining: v[0] - v[1],
+        endTime: v[3],
+      };
+    }
+  } catch (e) {}
+
+  // Get claimable vested
+  let claimableAmt = 0n;
+  try {
+    claimableAmt = await publicClient.readContract({
+      address: AGC_TOKEN_ADDRESS,
+      abi: parseAbi(["function getClaimableVested(address) view returns (uint256)"]),
+      functionName: "getClaimableVested",
+      args: [account.address],
+    });
+  } catch (e) {}
+
+  const totalAvailableAgc = agcBal + claimableAmt;
+
+  console.log(`> 🛡️ Hedge Status`);
+  console.log(`> Address: ${account.address}`);
+  console.log(`>`);
+  console.log(`> 💰 Liquid AGC: ${(Number(agcBal) / 1e18).toFixed(6)} AGC`);
+  if (claimableAmt > 0n) {
+    console.log(`> 🔓 Claimable Vested: ${(Number(claimableAmt) / 1e18).toFixed(6)} AGC`);
+    console.log(`> 📊 Total Available: ${(Number(totalAvailableAgc) / 1e18).toFixed(6)} AGC`);
+    console.log(`>    💡 Run 'claim' first to unlock claimable AGC before hedging.`);
+  }
+  console.log(`> 💎 ETH Balance: ${(Number(ethBal) / 1e18).toFixed(6)} ETH`);
+
+  if (!vestInfo) {
+    console.log(`>`);
+    console.log(`> ⚠️ No vesting schedule found. Nothing to hedge.`);
+    return;
+  }
+
+  const remaining = vestInfo.remaining;
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  const daysLeft = vestInfo.endTime > now ? Number(vestInfo.endTime - now) / 86400 : 0;
+
+  console.log(`>`);
+  console.log(`> 🔒 Vesting:`);
+  console.log(`>   Total Locked: ${(Number(vestInfo.totalLocked) / 1e18).toFixed(6)} AGC`);
+  console.log(`>   Released: ${(Number(vestInfo.released) / 1e18).toFixed(6)} AGC`);
+  console.log(`>   Remaining (exposure): ${(Number(remaining) / 1e18).toFixed(6)} AGC`);
+  console.log(`>   Days Left: ${daysLeft.toFixed(1)}`);
+
+  if (agcBal <= 0n) {
+    console.log(`>`);
+    console.log(`> ⚠️ No liquid AGC available for hedging.`);
+    return;
+  }
+
+  // Simulate swap AGC → ETH
+  try {
+    const res = await publicClient.readContract({
+      address: LIKWID_HELPER_ADDRESS,
+      abi: LIKWID_HELPER_ABI,
+      functionName: "getAmountOut",
+      args: [POOL_ID, false, agcBal, true],
+    });
+    const ethOut = res[0];
+
+    // Get pool reserves for coverage calculation
+    const state = await publicClient.readContract({
+      address: LIKWID_HELPER_ADDRESS,
+      abi: LIKWID_HELPER_ABI,
+      functionName: "getPoolStateInfo",
+      args: [POOL_ID],
+    });
+    const r0 = BigInt(state.pairReserve0);
+    const r1 = BigInt(state.pairReserve1);
+    // Value of remaining locked AGC in ETH = remaining * (r0 / r1)
+    const remainingValueEth = r1 > 0n ? (remaining * r0) / r1 : 0n;
+
+    console.log(`>`);
+    console.log(`> 📈 Hedge Simulation (swap ${(Number(agcBal) / 1e18).toFixed(2)} AGC → ~${(Number(ethOut) / 1e18).toFixed(6)} ETH):`);
+
+    for (const lev of [2, 3, 5]) {
+      const shortNotional = ethOut * BigInt(lev);
+      const coveragePct =
+        remainingValueEth > 0n ? Number((shortNotional * 10000n) / remainingValueEth) / 100 : 0;
+      console.log(
+        `>   ${lev}x leverage → Short ~${(Number(shortNotional) / 1e18).toFixed(6)} ETH notional → ${coveragePct.toFixed(1)}% coverage`,
+      );
+    }
+
+    console.log(`>`);
+    console.log(`> 💡 To execute: node genesis.js hedge <agc_amount> [leverage] [slippage]`);
+    console.log(`>    Example: node genesis.js hedge ${(Number(agcBal) / 1e18).toFixed(2)} 2`);
+  } catch (e) {
+    console.log(`>`);
+    console.log(`> ⚠️ Could not simulate swap: ${e.message}`);
+  }
+}
+
+async function hedge(agcAmountStr, leverageStr = "2", slippageStr = "1") {
+  if (!agcAmountStr) {
+    console.log(`> Usage: hedge <agc_amount> [leverage] [slippage]`);
+    console.log(`>`);
+    console.log(`> Hedging swaps your liquid AGC into ETH, then opens a Short AGC`);
+    console.log(`> position using that ETH as collateral — protecting your locked`);
+    console.log(`> vesting tokens against price drops.`);
+    console.log(`>`);
+    console.log(`>   agc_amount  Amount of AGC to swap into ETH for collateral`);
+    console.log(`>   leverage    Leverage multiplier (1-5, default: 2)`);
+    console.log(`>   slippage    Swap slippage tolerance % (default: 1)`);
+    console.log(`>`);
+    console.log(`> Examples:`);
+    console.log(`>   hedge 1000 2     Swap 1000 AGC → ETH, short @ 2x`);
+    console.log(`>   hedge 5000 3 2   Swap 5000 AGC → ETH, short @ 3x, 2% slippage`);
+    console.log(`>`);
+    console.log(`> Run 'hedge_status' first to see your hedging opportunity.`);
+    return;
+  }
+
+  const signer = getWalletInstance();
+  if (!signer) return formatError("No wallet found. Run create_wallet first.");
+  const account = await getSmartAccount(signer);
+
+  const agcAmount = parseEther(agcAmountStr);
+  const leverage = parseInt(leverageStr);
+  const slippage = BigInt(slippageStr);
+
+  if (leverage < 1 || leverage > 5) {
+    return formatError("Leverage must be between 1 and 5 (max per Likwid protocol rules).");
+  }
+
+  // 1. Check AGC balance
+  const agcBal = await publicClient.readContract({
+    address: AGC_TOKEN_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [account.address],
+  });
+
+  if (agcBal < agcAmount) {
+    console.log(`> ❌ Insufficient AGC balance!`);
+    console.log(`> Required: ${agcAmountStr} AGC`);
+    console.log(`> Available: ${(Number(agcBal) / 1e18).toFixed(6)} AGC`);
+    console.log(`> 💡 Run 'claim' to unlock vested AGC, or reduce the hedge amount.`);
+    return;
+  }
+
+  // 2. Simulate swap AGC → ETH
+  let ethOut;
+  try {
+    const res = await publicClient.readContract({
+      address: LIKWID_HELPER_ADDRESS,
+      abi: LIKWID_HELPER_ABI,
+      functionName: "getAmountOut",
+      args: [POOL_ID, false, agcAmount, true],
+    });
+    ethOut = res[0];
+  } catch (e) {
+    return formatError(`Swap simulation failed: ${e.message}`);
+  }
+
+  const ethOutMin = (ethOut * (100n - slippage)) / 100n;
+  const shortNotional = ethOut * BigInt(leverage);
+
+  // 3. Show execution plan
+  console.log(`> 🛡️ Hedge Execution Plan`);
+  console.log(`>`);
+  console.log(`> Step 1: Swap ${agcAmountStr} AGC → ~${(Number(ethOut) / 1e18).toFixed(6)} ETH`);
+  console.log(`>   Slippage: ${slippageStr}% | Min ETH: ${(Number(ethOutMin) / 1e18).toFixed(6)}`);
+  console.log(`>`);
+  console.log(`> Step 2: Open Short AGC @ ${leverage}x with ~${(Number(ethOut) / 1e18).toFixed(6)} ETH`);
+  console.log(`>   Short notional: ~${(Number(shortNotional) / 1e18).toFixed(6)} ETH`);
+  console.log(`>`);
+  console.log(`> Executing...`);
+
+  // 4. Capture ETH balance before swap
+  const ethBalBefore = await publicClient.getBalance({ address: account.address });
+
+  // 5. Execute Step 1: Swap AGC → ETH
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+  const swapCalls = [];
+  let swapDesc = "";
+
+  const agcApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_PAIR_POSITION, agcAmount);
+  if (agcApproval) {
+    swapCalls.push(agcApproval);
+    swapDesc += "Approve AGC + ";
+  }
+
+  const pmApproval = await getApprovalCall(
+    account.address,
+    AGC_TOKEN_ADDRESS,
+    AGENT_PAYMASTER_ADDRESS,
+    parseEther("1000000"),
+  );
+  if (pmApproval) {
+    swapCalls.push(pmApproval);
+    swapDesc += "Approve Paymaster + ";
+  }
+
+  swapCalls.push({
+    to: LIKWID_PAIR_POSITION,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: LIKWID_PAIR_ABI,
+      functionName: "exactInput",
+      args: [
+        {
+          poolId: POOL_ID,
+          zeroForOne: false,
+          to: account.address,
+          amountIn: agcAmount,
+          amountOutMin: ethOutMin,
+          deadline,
+        },
+      ],
+    }),
+  });
+  swapDesc += "Swap AGC→ETH (Hedge Step 1)";
+
+  console.log(`> 📤 ${swapDesc}`);
+  const swapReceipt = await runUserOp(account, swapCalls, swapDesc);
+  if (!swapReceipt) {
+    return formatError("Swap failed. Hedge aborted — no funds were spent.");
+  }
+
+  // 6. Calculate actual ETH received (gas paid by paymaster, so balance diff = swap output)
+  const ethBalAfter = await publicClient.getBalance({ address: account.address });
+  const ethReceived = ethBalAfter - ethBalBefore;
+  console.log(`> Received: ${(Number(ethReceived) / 1e18).toFixed(6)} ETH from swap`);
+
+  if (ethReceived <= 0n) {
+    return formatError("No ETH received from swap. Hedge aborted.");
+  }
+
+  // 7. Execute Step 2: Open Short AGC with all received ETH
+  const deadline2 = BigInt(Math.floor(Date.now() / 1000) + 300);
+  const marginCalls = [];
+  let marginDesc = "";
+
+  const pmApproval2 = await getApprovalCall(
+    account.address,
+    AGC_TOKEN_ADDRESS,
+    AGENT_PAYMASTER_ADDRESS,
+    parseEther("1000000"),
+  );
+  if (pmApproval2) {
+    marginCalls.push(pmApproval2);
+    marginDesc += "Approve Paymaster + ";
+  }
+
+  marginCalls.push({
+    to: LIKWID_MARGIN_POSITION,
+    value: ethReceived,
+    data: encodeFunctionData({
+      abi: LIKWID_MARGIN_ABI,
+      functionName: "addMargin",
+      args: [
+        POOL_KEY,
+        {
+          marginForOne: false, // Short AGC = margin on token0 (ETH) side
+          leverage,
+          marginAmount: ethReceived,
+          borrowAmount: 0n,
+          borrowAmountMax: parseEther("1000000000"),
+          recipient: account.address,
+          deadline: deadline2,
+        },
+      ],
+    }),
+  });
+  marginDesc += `Open Short AGC ${leverage}x (Hedge Step 2)`;
+
+  console.log(`> 📤 ${marginDesc}`);
+  const marginReceipt = await runUserOp(account, marginCalls, marginDesc);
+  if (!marginReceipt) {
+    console.log(`> ⚠️ Short position failed. Your ${(Number(ethReceived) / 1e18).toFixed(6)} ETH from the swap is still in your wallet.`);
+    console.log(`> 💡 You can retry manually: node likwid.js margin_open short ${(Number(ethReceived) / 1e18).toFixed(6)} ${leverage}`);
+    return;
+  }
+
+  // 8. Final status
+  const [finalEth, finalAgc] = await Promise.all([
+    publicClient.getBalance({ address: account.address }),
+    publicClient.readContract({
+      address: AGC_TOKEN_ADDRESS,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [account.address],
+    }),
+  ]);
+
+  console.log(`>`);
+  console.log(`> ✅ Hedge Complete!`);
+  console.log(`>   Swapped: ${agcAmountStr} AGC → ${(Number(ethReceived) / 1e18).toFixed(6)} ETH`);
+  console.log(`>   Opened: Short AGC @ ${leverage}x (${(Number(ethReceived) / 1e18).toFixed(6)} ETH collateral)`);
+  console.log(`>   Final ETH: ${(Number(finalEth) / 1e18).toFixed(6)} ETH`);
+  console.log(`>   Final AGC: ${(Number(finalAgc) / 1e18).toFixed(6)} AGC`);
+}
+
 // ======================= CLI ROUTER =======================
 const args = process.argv.slice(2);
 const command = args[0];
@@ -528,6 +860,10 @@ Mining Workflow:
 Vesting:
   claimable                 Check claimable vested AGC balance.
   claim                     Claim vested AGC tokens.
+
+Hedging (Whitepaper §6 — Likwid Agent Hedge):
+  hedge_status              Analyze hedging opportunity (vesting, coverage simulation).
+  hedge <agc> [lev] [slip]  Execute hedge: swap AGC→ETH → open Short AGC position.
 
 Info:
   cooldown                  Check time until next mining opportunity.
@@ -580,6 +916,12 @@ DeFi Operations → use likwid.js:
       break;
     case "reclaim_bill":
       await reclaim_bill(args[1]);
+      break;
+    case "hedge_status":
+      await hedge_status();
+      break;
+    case "hedge":
+      await hedge(args[1], args[2], args[3]);
       break;
     default:
       console.log("Unknown command:", command);
