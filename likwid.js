@@ -182,18 +182,98 @@ async function lp_add(amountEthStr, slippageStr = "1") {
   await runUserOp(account, lpCalls, description);
 }
 
+/**
+ * Parse human-friendly margin direction into protocol parameters.
+ *
+ * Accepted inputs (case-insensitive):
+ *   Long AGC:  "long", "long-agc", "agc"      → marginForOne=true,  collateral=AGC
+ *   Short AGC: "short", "short-agc", "eth", "long-eth" → marginForOne=false, collateral=ETH
+ *
+ * Returns { marginForOne, collateralAsset, tradeLabel } or null if invalid.
+ */
+function parseMarginDirection(raw) {
+  if (!raw) return null;
+  const d = raw.toLowerCase().replace(/[\s_]/g, "-");
+  const longAGC = ["long", "long-agc", "agc"];
+  const shortAGC = ["short", "short-agc", "eth", "long-eth"];
+  if (longAGC.includes(d)) return { marginForOne: true, collateralAsset: "AGC", tradeLabel: "Long AGC (看多 AGC)" };
+  if (shortAGC.includes(d)) return { marginForOne: false, collateralAsset: "ETH", tradeLabel: "Short AGC (做空 AGC)" };
+  return null;
+}
+
 async function margin_open(direction, amountStr, leverageStr = "2") {
+  // --- 1. Parse direction ---
+  const parsed = parseMarginDirection(direction);
+  if (!parsed) {
+    console.log(`> ❌ Invalid direction: "${direction}"`);
+    console.log(`>`);
+    console.log(`> Usage: margin_open <direction> <amount> [leverage]`);
+    console.log(`>`);
+    console.log(`> Directions:`);
+    console.log(`>   long  / long-agc / agc       → Long AGC  (collateral: AGC)`);
+    console.log(`>   short / short-agc / eth       → Short AGC (collateral: ETH)`);
+    console.log(`>`);
+    console.log(`> Examples:`);
+    console.log(`>   margin_open long 1000 3    → Long AGC with 1000 AGC collateral @ 3x`);
+    console.log(`>   margin_open short 0.01 2   → Short AGC with 0.01 ETH collateral @ 2x`);
+    return;
+  }
+
+  const { marginForOne, collateralAsset, tradeLabel } = parsed;
+
+  // --- 2. Wallet & amount ---
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
   const account = await getSmartAccount(signer);
 
-  const marginForOne = direction === "agc";
-  const marginAmount = parseEther(amountStr || "0");
+  if (!amountStr || amountStr === "0") {
+    return formatError("Amount must be greater than 0.");
+  }
+  const marginAmount = parseEther(amountStr);
   const leverage = parseInt(leverageStr || "2");
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
 
-  const asset = marginForOne ? "AGC" : "ETH";
-  console.log(`> 📈 Opening Margin: ${amountStr} ${asset} @ ${leverage}x leverage`);
+  // --- 3. Balance pre-check ---
+  let balance;
+  if (marginForOne) {
+    // Collateral is AGC
+    balance = await publicClient.readContract({
+      address: AGC_TOKEN_ADDRESS,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [account.address],
+    });
+  } else {
+    // Collateral is ETH
+    balance = await publicClient.getBalance({ address: account.address });
+  }
+
+  const balanceFormatted = (Number(balance) / 1e18).toFixed(6);
+
+  if (balance < marginAmount) {
+    console.log(`> ❌ Insufficient ${collateralAsset} balance!`);
+    console.log(`>`);
+    console.log(`> ${tradeLabel}`);
+    console.log(`> Required collateral: ${amountStr} ${collateralAsset}`);
+    console.log(`> Available balance:   ${balanceFormatted} ${collateralAsset}`);
+    console.log(`> Shortfall:           ${((Number(marginAmount) - Number(balance)) / 1e18).toFixed(6)} ${collateralAsset}`);
+    console.log(`>`);
+    if (!marginForOne) {
+      console.log(`> 💡 To short AGC, you need ETH as collateral.`);
+      console.log(`>    Try a smaller amount, or fund your wallet with ETH first.`);
+    } else {
+      console.log(`> 💡 To long AGC, you need AGC as collateral.`);
+      console.log(`>    Try a smaller amount, or get AGC via swap/mining first.`);
+    }
+    return;
+  }
+
+  // --- 4. Summary & execute ---
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+  console.log(`> 📈 Opening Margin Position`);
+  console.log(`>    Direction:  ${tradeLabel}`);
+  console.log(`>    Collateral: ${amountStr} ${collateralAsset}`);
+  console.log(`>    Leverage:   ${leverage}x`);
+  console.log(`>    Balance:    ${balanceFormatted} ${collateralAsset}`);
 
   const marginCalls = [];
   let description = "";
@@ -240,7 +320,7 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
     }),
   };
   marginCalls.push(marginCall);
-  description += `Open Margin ${direction} ${leverageStr}x`;
+  description += `Open Margin ${tradeLabel} ${leverage}x`;
 
   await runUserOp(account, marginCalls, description);
 }
@@ -422,7 +502,7 @@ async function positions() {
   console.log(`>`);
   console.log(`> 📈 Margin Positions: ${marginPositions.length}`);
   for (const p of marginPositions) {
-    const dir = p.marginForOne ? "Long AGC" : "Long ETH";
+    const dir = p.marginForOne ? "Long AGC" : "Short AGC";
     console.log(
       `>   #${p.id} | ${dir} | Margin: ${(Number(p.marginAmount) / 1e18).toFixed(6)} | Total: ${(Number(p.marginTotal) / 1e18).toFixed(6)} | Debt: ${(Number(p.debtAmount) / 1e18).toFixed(6)}`,
     );
@@ -476,7 +556,7 @@ async function margin_info(tokenIdStr) {
       });
     } catch (e) {}
 
-    const dir = state.marginForOne ? "Long AGC" : "Long ETH";
+    const dir = state.marginForOne ? "Long AGC (看多 AGC)" : "Short AGC (做空 AGC)";
     console.log(`> 📈 Margin Position #${tokenIdStr}`);
     console.log(`> Owner: ${owner}`);
     console.log(`> Direction: ${dir}`);
@@ -705,6 +785,8 @@ DeFi Actions:
   swap <dir> <amt> [slip]       Swap between ETH and AGC (eth-agc / agc-eth).
   lp_add <eth> [slip]           Add liquidity to ETH/AGC pool.
   margin_open <dir> <amt> [lev] Open a margin position.
+                                Directions: long/agc (Long AGC, collateral=AGC)
+                                            short/eth (Short AGC, collateral=ETH)
   lend_open <asset> <amt>       Lend ETH or AGC.
   liquidate <id>                Liquidate a margin position.
   scan [window]                 Scan for liquidation opportunities.

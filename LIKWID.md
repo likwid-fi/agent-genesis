@@ -62,15 +62,32 @@ cd ~/.openclaw/skills/agent-genesis && node likwid.js lp_add <eth_amount> [slipp
 ```bash
 cd ~/.openclaw/skills/agent-genesis && node likwid.js margin_open <direction> <amount> [leverage]
 ```
-Directions: `eth` (long ETH) or `agc` (long AGC). Default leverage: 2x.
+
+**Direction mapping (human-friendly aliases):**
+
+| User intent | Direction arg | Collateral | Protocol action |
+|---|---|---|---|
+| **Long AGC** (看多 AGC) | `long` / `long-agc` / `agc` | AGC | Deposit AGC, borrow ETH |
+| **Short AGC** (做空 AGC) | `short` / `short-agc` / `eth` | ETH | Deposit ETH, borrow AGC |
+
+Default leverage: 2x. The `<amount>` is the **collateral amount** in the collateral asset.
+
+**⚠️ Key: Short AGC requires ETH collateral, NOT AGC!** If the user says "做空 AGC" or "short AGC", you must:
+1. Check ETH balance first
+2. Use `short` (or `eth`) as direction
+3. The amount parameter is in ETH
 
 **Preview for human:**
 > 📈 **Margin Position Preview:**
-> Direction: Long `<ASSET>`
-> Amount: `<AMOUNT>` `<ASSET>`
+> Direction: `<Long AGC / Short AGC>`
+> Collateral: `<AMOUNT>` `<COLLATERAL_ASSET>` (balance: `<BALANCE>`)
 > Leverage: `<LEVERAGE>x`
 > ⚠️ Leveraged positions carry liquidation risk.
 > Proceed? (yes/no)
+
+**If insufficient balance, report clearly:**
+> ❌ Insufficient `<ASSET>` — need `<REQUIRED>`, have `<BALANCE>`.
+> To short AGC, you need ETH as collateral. Fund your wallet with ETH first.
 
 ### Lend Assets
 
@@ -142,7 +159,7 @@ cd ~/.openclaw/skills/agent-genesis && node likwid.js margin_close <position_id>
 
 **Preview for human:**
 > 📉 **Close Margin Position #`<ID>`?**
-> Direction: `<Long AGC / Long ETH>`
+> Direction: `<Long AGC / Short AGC>`
 > Margin: `<AMT>` | Total: `<AMT>` | Debt: `<AMT>`
 > This will fully close the position and return remaining collateral.
 > Proceed? (yes/no)
@@ -189,7 +206,7 @@ Same error handling rules as the main skill (see SKILL.md §4). Key principle: i
 | :--- | :--- |
 | `swap <dir> <amt> [slip]` | Swap between ETH and AGC (eth-agc / agc-eth). |
 | `lp_add <eth> [slip]` | Add liquidity to ETH/AGC pool. |
-| `margin_open <dir> <amt> [lev]` | Open a margin position. |
+| `margin_open <dir> <amt> [lev]` | Open margin. dir: long/short/agc/eth. Pre-checks balance. |
 | `lend_open <asset> <amt>` | Lend ETH or AGC. |
 | `liquidate <id>` | Liquidate a margin position. |
 | `scan [window]` | Scan for liquidation opportunities. |
