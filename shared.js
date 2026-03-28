@@ -5,7 +5,7 @@
  * UserOperation execution, approval helpers, and common constants/ABIs.
  */
 
-const { createSmartAccountClient } = require("permissionless");
+const { createSmartAccountClient, ENTRYPOINT_ADDRESS_V06 } = require("permissionless");
 const { signerToSimpleSmartAccount } = require("permissionless/accounts");
 const { createPimlicoBundlerClient } = require("permissionless/clients/pimlico");
 const {
@@ -36,7 +36,7 @@ const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0xf93A1977263beb4220
 const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0x01dB8A1C4e2B3887E29B432a240374FF43B64d8c";
 
 // ERC-4337 Infrastructure
-const ENTRY_POINT_ADDRESS = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"; // EntryPoint v0.6
+const ENTRY_POINT_ADDRESS = ENTRYPOINT_ADDRESS_V06; // EntryPoint v0.6
 const SMART_ACCOUNT_FACTORY_ADDRESS = "0x9406Cc6185a346906296840746125a0E44976454";
 
 // Likwid DeFi Constants
