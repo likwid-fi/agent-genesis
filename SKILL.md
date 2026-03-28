@@ -279,7 +279,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js cooldown
 ### Step 7: Claim Vested Tokens
 ```bash
 cd ~/.openclaw/skills/agent-genesis && node genesis.js claimable
-cd ~/.openclaw/skills/agent-genesis && node genesis.js vest
+cd ~/.openclaw/skills/agent-genesis && node genesis.js claim
 ```
 
 **Report to human:**
@@ -358,7 +358,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `reward [score]` | Check estimated reward (default score=1). |
 | `mine <sc> <sig> <non> [eth]` | Submit the mine transaction. |
 | `claimable` | Check claimable vested AGC balance. |
-| `vest` | Claim vested AGC tokens. |
+| `claim` | Claim vested AGC tokens. |
 | `reclaim_bill [pp]` | Generate Reclaim billing proof (pp = print proof). |
 
 ### likwid.js — DeFi Operations (see LIKWID.md)

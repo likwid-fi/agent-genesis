@@ -527,7 +527,7 @@ Mining Workflow:
 
 Vesting:
   claimable                 Check claimable vested AGC balance.
-  vest                      Claim vested AGC tokens.
+  claim                     Claim vested AGC tokens.
 
 Info:
   cooldown                  Check time until next mining opportunity.
@@ -572,7 +572,7 @@ DeFi Operations → use likwid.js:
     case "mine":
       await mine(args[1], args[2], args[3], args[4]);
       break;
-    case "vest":
+    case "claim":
       await claimVested();
       break;
     case "claimable":
