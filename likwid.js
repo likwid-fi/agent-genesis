@@ -232,32 +232,7 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
   const marginAmount = parseEther(amountStr);
   const leverage = parseInt(leverageStr || "2");
 
-  // --- 3. Minimum amount check ---
-  const MIN_ETH_COLLATERAL = parseEther("0.001"); // 0.001 ETH minimum for short
-  const MIN_AGC_COLLATERAL = parseEther("10");     // 10 AGC minimum for long
-
-  if (!marginForOne && marginAmount < MIN_ETH_COLLATERAL) {
-    console.log(`> ❌ Amount too small for Short AGC`);
-    console.log(`>`);
-    console.log(`> Minimum collateral: 0.001 ETH`);
-    console.log(`> You entered:        ${amountStr} ETH`);
-    console.log(`>`);
-    console.log(`> 💡 Positions below 0.001 ETH will fail due to gas costs exceeding position value.`);
-    console.log(`>    Try: margin_open short 0.01 2`);
-    return;
-  }
-  if (marginForOne && marginAmount < MIN_AGC_COLLATERAL) {
-    console.log(`> ❌ Amount too small for Long AGC`);
-    console.log(`>`);
-    console.log(`> Minimum collateral: 10 AGC`);
-    console.log(`> You entered:        ${amountStr} AGC`);
-    console.log(`>`);
-    console.log(`> 💡 Positions below 10 AGC will fail due to gas costs exceeding position value.`);
-    console.log(`>    Try: margin_open long 100 2`);
-    return;
-  }
-
-  // --- 4. Balance pre-check ---
+  // --- 3. Balance pre-check ---
   let balance;
   if (marginForOne) {
     // Collateral is AGC
@@ -300,15 +275,14 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
   console.log(`>    Leverage:   ${leverage}x`);
   console.log(`>    Balance:    ${balanceFormatted} ${collateralAsset}`);
 
-  const marginCalls = [];
-  let description = "";
+  // Collect approval calls (zero-value)
+  const approvalCalls = [];
 
   if (marginForOne) {
     const approval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_MARGIN_POSITION, marginAmount);
     if (approval) {
       console.log(`> Approving AGC for Margin...`);
-      marginCalls.push(approval);
-      description += "Approve AGC for Margin + ";
+      approvalCalls.push(approval);
     }
   }
 
@@ -320,8 +294,7 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
   );
   if (pmApproval) {
     console.log(`> Approving AGC for Paymaster sponsorship...`);
-    marginCalls.push(pmApproval);
-    description += "Approve AGC for Paymaster + ";
+    approvalCalls.push(pmApproval);
   }
 
   const marginCall = {
@@ -344,10 +317,24 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
       ],
     }),
   };
-  marginCalls.push(marginCall);
-  description += `Open Margin ${tradeLabel} ${leverage}x`;
 
-  await runUserOp(account, marginCalls, description);
+  if (marginForOne) {
+    // Long AGC: all calls are zero-value, safe to batch in executeBatch
+    const allCalls = [...approvalCalls, marginCall];
+    await runUserOp(account, allCalls, `Open Margin ${tradeLabel} ${leverage}x`);
+  } else {
+    // Short AGC: marginCall carries ETH value — must use execute() (single call).
+    // SimpleAccount v0.6 executeBatch() does NOT forward msg.value per call.
+    // Run approvals first (if any), then margin call separately.
+    if (approvalCalls.length > 0) {
+      const approvalResult = await runUserOp(account, approvalCalls, `Approve for ${tradeLabel}`);
+      if (!approvalResult) {
+        console.log(`> ❌ Approval step failed. Aborting margin open.`);
+        return;
+      }
+    }
+    await runUserOp(account, [marginCall], `Open Margin ${tradeLabel} ${leverage}x`);
+  }
 }
 
 async function lend_open(asset, amountStr) {

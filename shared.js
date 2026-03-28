@@ -169,10 +169,15 @@ async function runUserOp(account, calls, description) {
     },
   });
 
+  // Unwrap single-element arrays so encodeCallData uses execute() instead of executeBatch().
+  // executeBatch() on SimpleAccount v0.6 does NOT support msg.value per call,
+  // so any call with a non-zero value (e.g. Short AGC sending ETH) must go through execute().
+  const encodedCalls = Array.isArray(calls) && calls.length === 1 ? calls[0] : calls;
+
   console.log(`> Packaging UserOperation for ${description}...`);
   try {
     const userOpHash = await smartAccountClient.sendUserOperation({
-      userOperation: { callData: await account.encodeCallData(calls) },
+      userOperation: { callData: await account.encodeCallData(encodedCalls) },
     });
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
