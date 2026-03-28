@@ -196,8 +196,8 @@ function parseMarginDirection(raw) {
   const d = raw.toLowerCase().replace(/[\s_]/g, "-");
   const longAGC = ["long", "long-agc", "agc"];
   const shortAGC = ["short", "short-agc", "eth", "long-eth"];
-  if (longAGC.includes(d)) return { marginForOne: true, collateralAsset: "AGC", tradeLabel: "Long AGC (看多 AGC)" };
-  if (shortAGC.includes(d)) return { marginForOne: false, collateralAsset: "ETH", tradeLabel: "Short AGC (做空 AGC)" };
+  if (longAGC.includes(d)) return { marginForOne: true, collateralAsset: "AGC", tradeLabel: "Long AGC" };
+  if (shortAGC.includes(d)) return { marginForOne: false, collateralAsset: "ETH", tradeLabel: "Short AGC" };
   return null;
 }
 
@@ -556,7 +556,7 @@ async function margin_info(tokenIdStr) {
       });
     } catch (e) {}
 
-    const dir = state.marginForOne ? "Long AGC (看多 AGC)" : "Short AGC (做空 AGC)";
+    const dir = state.marginForOne ? "Long AGC" : "Short AGC";
     console.log(`> 📈 Margin Position #${tokenIdStr}`);
     console.log(`> Owner: ${owner}`);
     console.log(`> Direction: ${dir}`);

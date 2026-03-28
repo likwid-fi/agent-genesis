@@ -67,12 +67,12 @@ cd ~/.openclaw/skills/agent-genesis && node likwid.js margin_open <direction> <a
 
 | User intent | Direction arg | Collateral | Protocol action |
 |---|---|---|---|
-| **Long AGC** (看多 AGC) | `long` / `long-agc` / `agc` | AGC | Deposit AGC, borrow ETH |
-| **Short AGC** (做空 AGC) | `short` / `short-agc` / `eth` | ETH | Deposit ETH, borrow AGC |
+| **Long AGC** (bullish on AGC) | `long` / `long-agc` / `agc` | AGC | Deposit AGC, borrow ETH |
+| **Short AGC** (bearish on AGC) | `short` / `short-agc` / `eth` | ETH | Deposit ETH, borrow AGC |
 
 Default leverage: 2x. The `<amount>` is the **collateral amount** in the collateral asset.
 
-**⚠️ Key: Short AGC requires ETH collateral, NOT AGC!** If the user says "做空 AGC" or "short AGC", you must:
+**⚠️ Key: Short AGC requires ETH collateral, NOT AGC!** If the user says "short AGC", you must:
 1. Check ETH balance first
 2. Use `short` (or `eth`) as direction
 3. The amount parameter is in ETH
