@@ -180,7 +180,21 @@ async function runUserOp(account, calls, description) {
     console.log(`\n> ✅ ${description} Successful! Tx Hash: ${receipt.receipt.transactionHash}`);
     return receipt;
   } catch (e) {
-    console.error(`> ${description} execution failed:`, e.stack || e.message || e);
+    const errMsg = e.message || String(e);
+    // Detect gas estimation / contract revert errors and provide user-friendly output
+    if (errMsg.includes("EstimateGas") || errMsg.includes("execution reverted") || errMsg.includes("AA")) {
+      console.log(`> ❌ ${description} failed during gas estimation or execution.`);
+      console.log(`>`);
+      console.log(`> Possible causes:`);
+      console.log(`>   1. Collateral amount too small (try a larger amount)`);
+      console.log(`>   2. Insufficient token balance or allowance`);
+      console.log(`>   3. Paymaster out of funds (check AGC balance for gas sponsorship)`);
+      console.log(`>   4. Contract rejected the operation (invalid params or pool state)`);
+      console.log(`>`);
+      console.log(`> Technical detail: ${errMsg.slice(0, 200)}`);
+    } else {
+      console.error(`> ${description} execution failed:`, e.stack || errMsg);
+    }
     return null;
   }
 }

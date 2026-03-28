@@ -232,7 +232,32 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
   const marginAmount = parseEther(amountStr);
   const leverage = parseInt(leverageStr || "2");
 
-  // --- 3. Balance pre-check ---
+  // --- 3. Minimum amount check ---
+  const MIN_ETH_COLLATERAL = parseEther("0.001"); // 0.001 ETH minimum for short
+  const MIN_AGC_COLLATERAL = parseEther("10");     // 10 AGC minimum for long
+
+  if (!marginForOne && marginAmount < MIN_ETH_COLLATERAL) {
+    console.log(`> ❌ Amount too small for Short AGC`);
+    console.log(`>`);
+    console.log(`> Minimum collateral: 0.001 ETH`);
+    console.log(`> You entered:        ${amountStr} ETH`);
+    console.log(`>`);
+    console.log(`> 💡 Positions below 0.001 ETH will fail due to gas costs exceeding position value.`);
+    console.log(`>    Try: margin_open short 0.01 2`);
+    return;
+  }
+  if (marginForOne && marginAmount < MIN_AGC_COLLATERAL) {
+    console.log(`> ❌ Amount too small for Long AGC`);
+    console.log(`>`);
+    console.log(`> Minimum collateral: 10 AGC`);
+    console.log(`> You entered:        ${amountStr} AGC`);
+    console.log(`>`);
+    console.log(`> 💡 Positions below 10 AGC will fail due to gas costs exceeding position value.`);
+    console.log(`>    Try: margin_open long 100 2`);
+    return;
+  }
+
+  // --- 4. Balance pre-check ---
   let balance;
   if (marginForOne) {
     // Collateral is AGC

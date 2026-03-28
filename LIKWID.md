@@ -72,10 +72,16 @@ cd ~/.openclaw/skills/agent-genesis && node likwid.js margin_open <direction> <a
 
 Default leverage: 2x. The `<amount>` is the **collateral amount** in the collateral asset.
 
+**Minimum amounts:**
+- Short AGC: **0.001 ETH** minimum collateral
+- Long AGC: **10 AGC** minimum collateral
+- Amounts below these thresholds will be rejected — gas costs would exceed position value.
+
 **⚠️ Key: Short AGC requires ETH collateral, NOT AGC!** If the user says "short AGC", you must:
 1. Check ETH balance first
 2. Use `short` (or `eth`) as direction
 3. The amount parameter is in ETH
+4. Ensure amount is at least 0.001 ETH
 
 **Preview for human:**
 > 📈 **Margin Position Preview:**
