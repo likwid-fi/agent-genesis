@@ -2,7 +2,8 @@
  * likwid.js — Likwid Protocol DeFi operations for Agent Genesis.
  *
  * Provides: swap, liquidity, margin, lending, liquidation, and position management.
- * All operations interact with the Likwid Protocol on Sepolia via ERC-4337 UserOperations.
+ * All operations interact with the Likwid Protocol via ERC-4337 UserOperations.
+ * Network is determined by CHAIN config in shared.js.
  */
 
 const {
@@ -15,6 +16,8 @@ const {
   LIKWID_LEND_POSITION,
   POOL_KEY,
   POOL_ID,
+  NETWORK_NAME,
+  CHAIN_ID,
   // ABIs
   ERC20_ABI,
   LIKWID_PAIR_ABI,
@@ -259,7 +262,7 @@ async function margin_open(direction, amountStr, leverageStr = "2") {
     console.log(`>`);
     if (!marginForOne) {
       console.log(`> 💡 To short AGC, you need ETH as collateral.`);
-      console.log(`>    Try a smaller amount, or fund your wallet with ETH first.`);
+      console.log(`>    Send ETH on ${NETWORK_NAME} (Chain ID ${CHAIN_ID}) to your Smart Account, or try a smaller amount.`);
     } else {
       console.log(`> 💡 To long AGC, you need AGC as collateral.`);
       console.log(`>    Try a smaller amount, or get AGC via swap/mining first.`);

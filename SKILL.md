@@ -69,7 +69,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js get_smart_account
 
 > 🎉 **Agent Genesis Skill Ready!**
 >
-> 🔗 **Network: Base (Chain ID 8453)**
+> 🔗 **Network:** `<NETWORK_NAME>` (Chain ID `<CHAIN_ID>`) — read from `genesis.js check_wallet` or `genesis.js status` output. This is configured in `shared.js` and must NEVER be hardcoded; it changes automatically when the protocol switches networks.
 > 🔐 **Smart Account (ERC-4337):** `<SMART_ACCOUNT_ADDRESS>`
 > 🔑 **EOA Signer:** `<EOA_ADDRESS>`
 > 📁 **Wallet File:** `~/.openclaw/.likwid_genesis_wallet.json`
@@ -247,12 +247,14 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js cost <SCORE>
 Check ETH balance via `cost` output. If there is a deficit:
 
 > ⚠️ **ETH Top-Up Needed**
-> 🔗 **Network: Base (Chain ID 8453)**
+> ⚠️ **ETH Top-Up Needed**
 > Smart Account: `<ADDRESS>`
 > Current Balance: `<BALANCE>` ETH
 > Required: `<REQUIRED>` ETH
-> 📤 **Please send `<DEFICIT>` ETH on Base network** to the Smart Account address above, then confirm when done.
-> ⚠️ Make sure you send ETH on **Base**, not Ethereum mainnet or other networks.
+> 📤 **Please send `<DEFICIT>` ETH to the Smart Account address above.**
+> 🔗 **Network:** `<NETWORK_NAME>` (Chain ID `<CHAIN_ID>`)
+>
+> ⚠️ The network name and chain ID above MUST be read from the JS output (`genesis.js cost` / `genesis.js status`). The network is configured in `shared.js` — **never hardcode it**. When the protocol moves to mainnet, the JS output will automatically reflect the correct network.
 
 Wait for confirmation. Re-run `cost <SCORE>` to verify. Then:
 
@@ -384,7 +386,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 |---|---|
 | **Receipt timeout** | "⏳ Transaction submitted but confirmation is taking longer than expected. The transaction may still succeed — check your balance in a few minutes." |
 | **Cooldown not ready** | "⏳ Mining cooldown active. You can mine again in `<TIME>`." |
-| **Insufficient balance** | "⚠️ Insufficient `<ASSET>` balance. You have `<BALANCE>`, need `<REQUIRED>`. Send funds **on Base network (Chain ID 8453)** to your Smart Account." |
+| **Insufficient balance** | "⚠️ Insufficient `<ASSET>` balance. You have `<BALANCE>`, need `<REQUIRED>`." — The JS output already includes the network name and chain ID; relay it verbatim to the human. |
 | **Revert / on-chain error** | "❌ Transaction reverted: `<REASON>`. No funds were spent." |
 | **Signature already used / expired** | "🔄 Signature is no longer valid. Starting a fresh mining cycle: reclaim_bill → challenge → verify → mine." |
 | **Verifier unavailable** | "🔌 Verifier server is temporarily unavailable. Will retry in a few minutes." |

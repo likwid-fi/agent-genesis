@@ -14,6 +14,8 @@ const {
   POOL_KEY,
   POOL_ID,
   WALLET_FILE,
+  NETWORK_NAME,
+  CHAIN_ID,
   // ABIs
   ERC20_ABI,
   LIKWID_HELPER_ABI,
@@ -91,6 +93,7 @@ async function check_wallet() {
     }
 
     console.log(`> 🔑 Wallet Status: Found`);
+    console.log(`> 🔗 Network: ${NETWORK_NAME} (Chain ID ${CHAIN_ID})`);
     console.log(`>`);
     console.log(`> 🔐 Smart Account (ERC-4337):`);
     console.log(`> Address: ${account.address}`);
@@ -189,6 +192,7 @@ async function status() {
   const miningStatus = cooldownSec === 0n ? "✅ Yes" : `⏳ No — ${formatHumanSeconds(cooldownSec)} remaining`;
 
   console.log(`> 📊 Account Status`);
+  console.log(`> Network: ${NETWORK_NAME} (Chain ID ${CHAIN_ID})`);
   console.log(`> Address: ${account.address}`);
   console.log(`> ETH Balance: ${(Number(ethBal) / 1e18).toFixed(6)} ETH`);
   console.log(`> AGC Balance: ${(Number(agcBal) / 1e18).toFixed(6)} AGC`);
@@ -399,7 +403,7 @@ async function cost(score) {
     console.log(`> 💳 Current ETH Balance: ${(Number(ethBalance) / 1e18).toFixed(6)} ETH`);
     if (deficit > 0n) {
       console.log(
-        `> ⚠️  ETH Deficit: ${(Number(deficit) / 1e18).toFixed(6)} ETH — please top up your Smart Account before mining with Full Alignment.`,
+        `> ⚠️  ETH Deficit: ${(Number(deficit) / 1e18).toFixed(6)} ETH — please send ETH on ${NETWORK_NAME} (Chain ID ${CHAIN_ID}) to your Smart Account before mining with Full Alignment.`,
       );
     } else {
       console.log(`> ✅ ETH Balance sufficient for Full Alignment.`);

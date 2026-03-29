@@ -87,7 +87,8 @@ Default leverage: 2x. The `<amount>` is the **collateral amount** in the collate
 
 **If insufficient balance, report clearly:**
 > ❌ Insufficient `<ASSET>` — need `<REQUIRED>`, have `<BALANCE>`.
-> To short AGC, you need ETH as collateral. Send ETH **on Base network (Chain ID 8453)** to your Smart Account address to fund your wallet.
+> 🔗 **Network:** `<NETWORK_NAME>` (Chain ID `<CHAIN_ID>`)
+> To short AGC, you need ETH as collateral. The network info above MUST be read from the JS output (never hardcoded) — relay it verbatim to the human so they send ETH on the correct chain.
 
 ### Lend Assets
 

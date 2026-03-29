@@ -24,10 +24,15 @@ const path = require("path");
 const os = require("os");
 
 // ======================= CONFIGURATION =======================
+// Network identity — derived from chain config. Update these when switching networks.
+const CHAIN = sepolia;
+const NETWORK_NAME = CHAIN.name;   // e.g. "Sepolia", "Base", "Base Sepolia"
+const CHAIN_ID = CHAIN.id;         // e.g. 11155111, 8453, 84532
+
 const VERIFIER_URL = "https://verifier.likwid.fi";
 const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
 const PIMLICO_API_KEY = process.env.PIMLICO_API_KEY || "pim_KpSstT3FhZNDhk8PxECxQG";
-const BUNDLER_URL = `https://api.pimlico.io/v2/11155111/rpc?apikey=${PIMLICO_API_KEY}`;
+const BUNDLER_URL = `https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=${PIMLICO_API_KEY}`;
 
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -105,7 +110,7 @@ const LIKWID_HELPER_ABI = parseAbi([
 
 // ======================= CLIENTS =======================
 const publicClient = createPublicClient({
-  chain: sepolia,
+  chain: CHAIN,
   transport: http(RPC_URL),
 });
 
@@ -140,7 +145,7 @@ async function runUserOp(account, calls, description) {
   const smartAccountClient = createSmartAccountClient({
     account,
     entryPoint: ENTRY_POINT_ADDRESS,
-    chain: sepolia,
+    chain: CHAIN,
     bundlerTransport: http(BUNDLER_URL),
     middleware: {
       sponsorUserOperation: async ({ userOperation }) => {
@@ -270,6 +275,8 @@ function loadEnvConfig() {
 // ======================= EXPORTS =======================
 module.exports = {
   // Config
+  NETWORK_NAME,
+  CHAIN_ID,
   VERIFIER_URL,
   RPC_URL,
   BUNDLER_URL,
