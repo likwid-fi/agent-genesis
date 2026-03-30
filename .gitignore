@@ -11,6 +11,7 @@
 !/LIKWID.md
 !/bootstrap.sh
 !/.env.example
+!contracts/.gitmodules
 !contracts/foundry.toml
 !contracts/foundry.lock
 !contracts/remappings.txt
