@@ -13,6 +13,7 @@ import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Recei
 import {IPairPositionManager} from "@likwid-fi/core/interfaces/IPairPositionManager.sol";
 import {PoolKey} from "@likwid-fi/core/types/PoolKey.sol";
 import {Currency, CurrencyLibrary} from "@likwid-fi/core/types/Currency.sol";
+import {MineSignatureLib} from "./libraries/MineSignatureLib.sol";
 
 contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
@@ -211,7 +212,7 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
         view
         returns (bool)
     {
-        bytes32 hash = _getHash(sender, nonce, score);
+        bytes32 hash = MineSignatureLib.getHash(sender, nonce, score);
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(hash);
         address signer = ECDSA.recover(ethSignedMessageHash, signature);
         return signer == mineSigner;
@@ -296,17 +297,6 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
         } else {
             uint256 vested = (schedule.totalLocked * timeElapsed) / duration;
             return vested - schedule.released;
-        }
-    }
-
-    // Hash: keccak256(msg.sender, nonce)
-    function _getHash(address signer, uint256 nonce, uint256 score) internal pure returns (bytes32 hash) {
-        assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, shl(96, signer))
-            mstore(add(ptr, 20), nonce)
-            mstore(add(ptr, 52), score)
-            hash := keccak256(ptr, 84)
         }
     }
 

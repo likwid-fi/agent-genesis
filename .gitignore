@@ -15,8 +15,8 @@
 !contracts/foundry.toml
 !contracts/foundry.lock
 !contracts/remappings.txt
-!contracts/src/AgentGenesisCoin.sol
-!contracts/src/AgentPaymaster.sol
+!contracts/src/*.sol
+!contracts/src/**/*.sol
 !contracts/test/AgentGenesisCoin.t.sol
 !contracts/test/AgentPaymaster.t.sol
 !audit/AGC_SECURITY_AUDIT_v3.md

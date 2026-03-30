@@ -5,13 +5,14 @@
  * UserOperation execution, approval helpers, and common constants/ABIs.
  */
 
-const { createSmartAccountClient, ENTRYPOINT_ADDRESS_V06 } = require("permissionless");
+const { createSmartAccountClient, createBundlerClient, ENTRYPOINT_ADDRESS_V06 } = require("permissionless");
 const { signerToSimpleSmartAccount } = require("permissionless/accounts");
-const { createPimlicoBundlerClient } = require("permissionless/clients/pimlico");
 const {
   createPublicClient,
+  custom,
   http,
   parseEther,
+  toHex,
   encodeFunctionData,
   parseAbi,
   keccak256,
@@ -31,14 +32,13 @@ const CHAIN_ID = CHAIN.id;         // e.g. 11155111, 8453, 84532
 
 const VERIFIER_URL = "https://verifier.likwid.fi";
 const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
-const PIMLICO_API_KEY = process.env.PIMLICO_API_KEY || "pim_KpSstT3FhZNDhk8PxECxQG";
-const BUNDLER_URL = `https://api.pimlico.io/v2/${CHAIN_ID}/rpc?apikey=${PIMLICO_API_KEY}`;
+const BUNDLER_URL = process.env.BUNDLER_URL || "https://bundler.particle.network";
 
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0xf93A1977263beb42203F4CB7A86fEB4c0a9133ee";
-const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0x01dB8A1C4e2B3887E29B432a240374FF43B64d8c";
+const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F";
+const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3";
 
 // ERC-4337 Infrastructure
 const ENTRY_POINT_ADDRESS = ENTRYPOINT_ADDRESS_V06; // EntryPoint v0.6
@@ -114,10 +114,101 @@ const publicClient = createPublicClient({
   transport: http(RPC_URL),
 });
 
-const pimlicoBundlerClient = createPimlicoBundlerClient({
-  transport: http(BUNDLER_URL),
+// ======================= BUNDLER =======================
+
+let bundlerRequestId = 0;
+
+function serializeRpcValue(value) {
+  if (typeof value === "bigint") return toHex(value);
+  if (Array.isArray(value)) return value.map(serializeRpcValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, serializeRpcValue(nested)]));
+  }
+  return value;
+}
+
+async function bundlerRequest(method, params) {
+  const response = await fetch(BUNDLER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: ++bundlerRequestId,
+      chainId: CHAIN_ID,
+      method,
+      params: serializeRpcValue(params),
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || response.statusText);
+  }
+  if (payload.error) {
+    const error = new Error(payload.error.message || "Bundler request failed");
+    error.code = payload.error.code;
+    error.extraData = payload.error.extraData;
+    throw error;
+  }
+  return payload.result;
+}
+
+function createParticleBundlerTransport() {
+  return custom({
+    request: ({ method, params }) => bundlerRequest(method, params),
+  });
+}
+
+const bundlerTransport = createParticleBundlerTransport();
+
+const bundlerClient = createBundlerClient({
+  chain: CHAIN,
   entryPoint: ENTRY_POINT_ADDRESS,
+  transport: bundlerTransport,
 });
+
+async function estimateUserOperationGas(userOperation) {
+  return bundlerClient.estimateUserOperationGas({ userOperation });
+}
+
+// Particle requires `chainId` in every bundler RPC body and exposes fee fields
+// on raw estimate responses that permissionless' normalized estimate omits.
+async function estimateParticleUserOperationGasRaw(userOperation) {
+  return bundlerRequest("eth_estimateUserOperationGas", [userOperation, ENTRY_POINT_ADDRESS]);
+}
+
+async function getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices) {
+  const opToEstimate = {
+    ...userOperation,
+    paymasterAndData: AGENT_PAYMASTER_ADDRESS,
+    maxFeePerGas: fallbackGasPrices.maxFeePerGas,
+    maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
+  };
+
+  const [estimate, rawEstimate] = await Promise.all([
+    estimateUserOperationGas(opToEstimate),
+    estimateParticleUserOperationGasRaw(opToEstimate),
+  ]);
+
+  return {
+    ...estimate,
+    maxFeePerGas: rawEstimate.maxFeePerGas ?? fallbackGasPrices.maxFeePerGas,
+    maxPriorityFeePerGas: rawEstimate.maxPriorityFeePerGas ?? fallbackGasPrices.maxPriorityFeePerGas,
+    paymasterAndData: AGENT_PAYMASTER_ADDRESS,
+  };
+}
+
+async function waitForUserOperationReceipt(hash, timeout = 120_000) {
+  return bundlerClient.waitForUserOperationReceipt({ hash, timeout });
+}
+
+async function getBundlerGasPrice() {
+  const fees = await publicClient.estimateFeesPerGas();
+  return {
+    maxFeePerGas: fees.maxFeePerGas,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+  };
+}
 
 // ======================= WALLET & ACCOUNT =======================
 
@@ -146,29 +237,17 @@ async function runUserOp(account, calls, description) {
     account,
     entryPoint: ENTRY_POINT_ADDRESS,
     chain: CHAIN,
-    bundlerTransport: http(BUNDLER_URL),
+    bundlerTransport,
     middleware: {
       sponsorUserOperation: async ({ userOperation }) => {
         console.log(`> Estimating gas and attaching custom paymaster (${description})...`);
-        const gasPrices = await pimlicoBundlerClient.getUserOperationGasPrice();
-
-        const opToEstimate = {
-          ...userOperation,
-          paymasterAndData: AGENT_PAYMASTER_ADDRESS,
-          maxFeePerGas: gasPrices.fast.maxFeePerGas,
-          maxPriorityFeePerGas: gasPrices.fast.maxPriorityFeePerGas,
-        };
-
-        const estimate = await pimlicoBundlerClient.estimateUserOperationGas({
-          userOperation: opToEstimate,
-        });
+        const fallbackGasPrices = await getBundlerGasPrice();
+        const estimate = await getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices);
 
         return {
           ...estimate,
           verificationGasLimit:
             BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
-          ...gasPrices.fast,
-          paymasterAndData: AGENT_PAYMASTER_ADDRESS,
         };
       },
     },
@@ -186,7 +265,7 @@ async function runUserOp(account, calls, description) {
     });
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
-    const receipt = await pimlicoBundlerClient.waitForUserOperationReceipt({ hash: userOpHash, timeout: 120_000 });
+    const receipt = await waitForUserOperationReceipt(userOpHash, 120_000);
     console.log(`\n> ✅ ${description} Successful! Tx Hash: ${receipt.receipt.transactionHash}`);
     return receipt;
   } catch (e) {
@@ -300,7 +379,7 @@ module.exports = {
   LIKWID_HELPER_ABI,
   // Clients
   publicClient,
-  pimlicoBundlerClient,
+  bundlerClient,
   // Wallet & Account
   getWalletInstance,
   getSmartAccount,
