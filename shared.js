@@ -15,6 +15,7 @@ const {
   toHex,
   encodeFunctionData,
   parseAbi,
+  toFunctionSelector,
   keccak256,
   encodeAbiParameters,
 } = require("viem");
@@ -74,6 +75,16 @@ const ERC20_ABI = parseAbi([
   "function approve(address spender, uint256 amount) external returns (bool)",
   "function allowance(address owner, address spender) external view returns (uint256)",
   "function balanceOf(address account) external view returns (uint256)",
+]);
+
+const AGC_MINE_ABI = parseAbi([
+  "function mine(uint256 score, bytes calldata signature, uint256 nonce) external payable",
+]);
+
+const AGC_MINE_SELECTOR = toFunctionSelector(AGC_MINE_ABI[0]);
+
+const AGENT_PAYMASTER_ABI = parseAbi([
+  "function hasFreeMined(address user) external view returns (bool)",
 ]);
 
 const LIKWID_PAIR_ABI = parseAbi([
@@ -210,6 +221,16 @@ async function getBundlerGasPrice() {
   };
 }
 
+async function getDirectEthFallbackGasPrice() {
+  const fees = await getBundlerGasPrice();
+  const minBundlerGasPrice = 1_000_000_000n; // 1 gwei floor for Particle bundler direct ETH mode
+  return {
+    maxFeePerGas: fees.maxFeePerGas > minBundlerGasPrice ? fees.maxFeePerGas : minBundlerGasPrice,
+    maxPriorityFeePerGas:
+      fees.maxPriorityFeePerGas > minBundlerGasPrice ? fees.maxPriorityFeePerGas : minBundlerGasPrice,
+  };
+}
+
 // ======================= WALLET & ACCOUNT =======================
 
 function getWalletInstance() {
@@ -233,7 +254,24 @@ async function getSmartAccount(signer) {
 // ======================= USER OPERATION =======================
 
 async function runUserOp(account, calls, description) {
-  let payingWithETH = false;
+  let gasPaymentMode = "agc";
+  const expectsFreeMine = isFreeMineOperation(calls);
+  let canUseFreeMine = false;
+
+  if (expectsFreeMine) {
+    try {
+      const hasFreeMined = await publicClient.readContract({
+        address: AGENT_PAYMASTER_ADDRESS,
+        abi: AGENT_PAYMASTER_ABI,
+        functionName: "hasFreeMined",
+        args: [account.address],
+      });
+      canUseFreeMine = !hasFreeMined;
+    } catch {
+      // If this read fails, stay conservative and avoid labeling the op as free.
+      canUseFreeMine = false;
+    }
+  }
 
   const smartAccountClient = createSmartAccountClient({
     account,
@@ -248,14 +286,31 @@ async function runUserOp(account, calls, description) {
         // Try with AGC paymaster first (handles both AGC gas payment and free mine)
         try {
           const estimate = await getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices);
+          gasPaymentMode = canUseFreeMine ? "free" : "agc";
+
           return {
             ...estimate,
             verificationGasLimit:
               BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
           };
         } catch (paymasterError) {
-          // Paymaster failed (likely insufficient AGC balance) — fall back to direct ETH payment
-          console.log(`> ⚠️  Paymaster estimation failed: ${(paymasterError.message || "").slice(0, 120)}`);
+          const paymasterErrorMessage = [
+            paymasterError?.message,
+            paymasterError?.cause?.message,
+            typeof paymasterError?.extraData === "string" ? paymasterError.extraData : null,
+          ]
+            .filter(Boolean)
+            .join(" | ");
+
+          const normalizedPaymasterError = paymasterErrorMessage.toLowerCase();
+          const shouldFallbackToEth = isPaymasterFallbackableError(normalizedPaymasterError);
+
+          if (!shouldFallbackToEth) {
+            throw paymasterError;
+          }
+
+          // Paymaster failed because AGC funding/approval is missing — fall back to direct ETH payment
+          console.log(`> ⚠️  Paymaster AGC charge failed: ${paymasterErrorMessage.slice(0, 160)}`);
           console.log(`> Falling back to direct ETH gas payment from smart account...`);
 
           const ethBalance = await publicClient.getBalance({ address: account.address });
@@ -275,7 +330,7 @@ async function runUserOp(account, calls, description) {
           };
           const estimate = await estimateUserOperationGas(opToEstimate);
 
-          payingWithETH = true;
+          gasPaymentMode = "eth";
           return {
             ...estimate,
             maxFeePerGas: fallbackGasPrices.maxFeePerGas,
@@ -294,15 +349,59 @@ async function runUserOp(account, calls, description) {
   // so any call with a non-zero value (e.g. Short AGC sending ETH) must go through execute().
   const encodedCalls = Array.isArray(calls) && calls.length === 1 ? calls[0] : calls;
 
+  const ethSmartAccountClient = createSmartAccountClient({
+    account,
+    entryPoint: ENTRY_POINT_ADDRESS,
+    chain: CHAIN,
+    bundlerTransport,
+    middleware: {
+      gasPrice: getDirectEthFallbackGasPrice,
+    },
+  });
+
   console.log(`> Packaging UserOperation for ${description}...`);
   try {
-    const userOpHash = await smartAccountClient.sendUserOperation({
-      userOperation: { callData: await account.encodeCallData(encodedCalls) },
-    });
+    const callData = await account.encodeCallData(encodedCalls);
+    let userOpHash;
+
+    try {
+      userOpHash = await smartAccountClient.sendUserOperation({
+        userOperation: { callData },
+      });
+    } catch (paymasterSendError) {
+      const normalizedPaymasterError = getNormalizedErrorMessage(paymasterSendError);
+      if (!isPaymasterFallbackableError(normalizedPaymasterError)) {
+        throw paymasterSendError;
+      }
+
+      console.log(`> ⚠️  Paymaster submit failed: ${normalizedPaymasterError.slice(0, 160)}`);
+      console.log(`> Retrying with direct ETH gas payment from smart account...`);
+
+      const ethBalance = await publicClient.getBalance({ address: account.address });
+      if (ethBalance === 0n) {
+        throw new Error(
+          "Insufficient AGC for paymaster AND no ETH in smart account. " +
+          "Please deposit ETH or AGC to your smart account before retrying.",
+        );
+      }
+
+      gasPaymentMode = "eth";
+      const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
+        userOperation: { callData },
+      });
+      ethUserOperation.signature = await account.signUserOperation(ethUserOperation);
+      userOpHash = await bundlerRequest("eth_sendUserOperation", [ethUserOperation, ENTRY_POINT_ADDRESS]);
+    }
+
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
     const receipt = await waitForUserOperationReceipt(userOpHash, 120_000);
-    const gasNote = payingWithETH ? " (gas paid in ETH)" : " (gas paid in AGC)";
+    const gasNote =
+      gasPaymentMode === "free"
+        ? " (first mine sponsored by paymaster)"
+        : gasPaymentMode === "eth"
+          ? " (gas paid in ETH)"
+          : " (gas paid in AGC)";
     console.log(`\n> ✅ ${description} Successful!${gasNote} Tx Hash: ${receipt.receipt.transactionHash}`);
     return receipt;
   } catch (e) {
@@ -347,6 +446,53 @@ async function getApprovalCall(accountAddress, tokenAddress, spenderAddress, req
     };
   }
   return null;
+}
+
+function isFreeMineCall(call) {
+  return (
+    call &&
+    call.to &&
+    typeof call.to === "string" &&
+    call.to.toLowerCase() === AGC_TOKEN_ADDRESS.toLowerCase() &&
+    typeof call.data === "string" &&
+    call.data.startsWith(AGC_MINE_SELECTOR)
+  );
+}
+
+function isFreeMineOperation(calls) {
+  if (!Array.isArray(calls)) {
+    return isFreeMineCall(calls);
+  }
+  return calls.length > 0 && calls.every(isFreeMineCall);
+}
+
+function isPaymasterFallbackableError(normalizedPaymasterError) {
+  return (
+    normalizedPaymasterError.includes("erc20insufficientbalance") ||
+    normalizedPaymasterError.includes("erc20insufficientallowance") ||
+    normalizedPaymasterError.includes("safeerc20failedoperation") ||
+    normalizedPaymasterError.includes("erc20: insufficient allowance") ||
+    normalizedPaymasterError.includes("erc20: transfer amount exceeds balance") ||
+    normalizedPaymasterError.includes("erc20: transfer amount exceeds allowance") ||
+    normalizedPaymasterError.includes("transfer amount exceeds balance") ||
+    normalizedPaymasterError.includes("transfer amount exceeds allowance") ||
+    normalizedPaymasterError.includes("validatepaymasteruserop") ||
+    normalizedPaymasterError.includes("paymaster") && normalizedPaymasterError.includes("revert") ||
+    normalizedPaymasterError.includes("paymaster") && normalizedPaymasterError.includes("out of gas")
+  );
+}
+
+function getNormalizedErrorMessage(error) {
+  return [
+    error?.message,
+    error?.cause?.message,
+    typeof error?.extraData === "string" ? error.extraData : null,
+    error?.details,
+    typeof error?.shortMessage === "string" ? error.shortMessage : null,
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
 }
 
 function formatError(msg) {
