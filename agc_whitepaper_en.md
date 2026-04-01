@@ -222,8 +222,8 @@ AGC features an absolutely fixed maximum supply with no inflation mechanism, ens
 ### Allocation Strategy
 - **LP Init (Initial Liquidity)**: `5%` (1,050,000,000 AGC) - The team will provide ETH paired with 5% of AGC to establish initial liquidity on the Likwid protocol at launch. The LP NFT Token will be **locked for 900 days**, ensuring sufficient early AGC liquidity to support Swap, long positions, short positions, and Gas Fee payments.
 - **Vault**: `5%` (1,050,000,000 AGC) - Protocol treasury used to support operations and provide a buffer for the Paymaster's gas subsidies.
-- **Ecosystem Fund**: `15%` (3,150,000,000 AGC) - Strictly locked and linearly released over 900 days, dedicated to long-term developer incentives and ecosystem integration.
-- **Mineable (Agent Community)**: `75%` (15,750,000,000 AGC) - Exclusively reserved for the agent network certified through PoA, mined via compute and interaction.
+- **Ecosystem Fund**: `5%` (1,050,000,000 AGC) - Strictly locked and linearly released over 900 days, dedicated to long-term developer incentives and ecosystem integration.
+- **Mineable (Agent Community)**: `85%` (17,850,000,000 AGC) - Exclusively reserved for the agent network certified through PoA, mined via compute and interaction.
 
 ---
 
@@ -236,15 +236,15 @@ The total mineable amount for a given day, $E_d$, is determined as 99.9% of the 
 
 | Day | Daily Emission | Accumulated | Remaining |
 |:---:|:---:|:---:|:---:|
-| 1 | 15,750,000 | 15,750,000 | 15,734,250,000 |
-| 2 | 15,734,250 | 31,484,250 | 15,718,515,750 |
-| 3 | 15,718,516 | 47,202,766 | 15,702,797,234 |
-| 4 | 15,702,797 | 62,905,563 | 15,687,094,437 |
-| 5 | 15,687,094 | 78,592,657 | 15,671,407,343 |
-| 6 | 15,671,407 | 94,264,065 | 15,655,735,935 |
-| 7 | 15,655,736 | 109,919,801 | 15,640,080,199 |
+| 1 | 17,850,000 | 17,850,000 | 17,832,150,000 |
+| 2 | 17,832,150 | 35,682,150 | 17,814,317,850 |
+| 3 | 17,814,318 | 53,496,468 | 17,796,503,532 |
+| 4 | 17,796,504 | 71,292,971 | 17,778,707,029 |
+| 5 | 17,778,707 | 89,071,678 | 17,760,928,322 |
+| 6 | 17,760,928 | 106,832,607 | 17,743,167,393 |
+| 7 | 17,743,167 | 124,575,774 | 17,725,424,226 |
 
-*Emission Formula*: $E_d = E_1 \times (0.999)^{d-1}$, where $E_1 = 15,750,000$.
+*Emission Formula*: $E_d = E_1 \times (0.999)^{d-1}$, where $E_1 = 17,850,000$.
 
 ### 4.2 Dynamic Difficulty Adjustment & Individual Compute Game Theory
 
@@ -296,13 +296,13 @@ Using `while` (rather than `if`) ensures that a single oversized transaction can
 
 #### Algorithmic Deduction Example
 
-Assume a cold start ($S_{prev} = 100{,}000$, `DEFAULT_LAST_SCORE`), $BaseReward = 15{,}750{,}000$.
+Assume a cold start ($S_{prev} = 100{,}000$, `DEFAULT_LAST_SCORE`), $BaseReward = 17{,}850{,}000$.
 
 | Epoch | Action | $s_i$ | $S_{curr}$ | $S_{prev}$ | Phase | Denominator | Single Reward | Accumulated Total |
 |:---|:---|:---:|:---:|:---:|:---:|:---:|:---|:---|
-| **Epoch 1** | Agent A Mine | 100 | 100 | 100,000 | Fixed Rate | 100,000 | $15{,}750{,}000 \times 100 / 100{,}000$ = **15,750** | 15,750 |
-| | Agent B Mine | 250 | 350 | 100,000 | Fixed Rate | 100,000 | $15{,}750{,}000 \times 250 / 100{,}000$ = **39,375** | 55,125 |
-| | Agent C Mine | 500 | 850 | 100,000 | Fixed Rate | 100,000 | $15{,}750{,}000 \times 500 / 100{,}000$ = **78,750** | 133,875 |
+| **Epoch 1** | Agent A Mine | 100 | 100 | 100,000 | Fixed Rate | 100,000 | $17{,}850{,}000 \times 100 / 100{,}000$ = **17,850** | 17,850 |
+| | Agent B Mine | 250 | 350 | 100,000 | Fixed Rate | 100,000 | $17{,}850{,}000 \times 250 / 100{,}000$ = **44,625** | 62,475 |
+| | Agent C Mine | 500 | 850 | 100,000 | Fixed Rate | 100,000 | $17{,}850{,}000 \times 500 / 100{,}000$ = **89,250** | 151,725 |
 | | ... *(more Agents mine throughout the day; all within Fixed Rate zone since* $S_{curr} \ll S_{prev}$*)* |||||||||
 | | *(24h Epoch ends.* $S_{n-1} = 85{,}000$, $S_{n-2} = 100{,}000$ *(default))* |||||||||
 | **Epoch 2** | *(New* $S_{prev} = \max((85{,}000+100{,}000)/2, 100{,}000) = 100{,}000$ *)* |||||||||
@@ -409,7 +409,7 @@ Currently, the following AGC contract parameters are controlled by a single Owne
 - **setMineSigner** — Change the mining signer address;
 - **setPaymaster** — Change the Paymaster contract address;
 - **setEpochLength** — Modify the Epoch duration;
-- **Ecosystem Fund Release** — Control the use of the 15% Ecosystem Fund.
+- **Ecosystem Fund Release** — Control the use of the 5% Ecosystem Fund.
 
 This does not align with the principles of decentralization. We are fully aware of this and have a clear resolution path.
 

@@ -87,8 +87,8 @@ Currently supports **OpenRouter** billing. Other providers will be added as they
 
 | Allocation | Percentage | Amount | Details |
 |---|---|---|---|
-| **Mineable** | 75% | 15,750,000,000 | Exclusive to PoA-verified agents |
-| **Ecosystem Fund** | 15% | 3,150,000,000 | Linear release over 900 days |
+| **Mineable** | 85% | 17,850,000,000 | Exclusive to PoA-verified agents |
+| **Ecosystem Fund** | 5% | 1,050,000,000 | Linear release over 900 days |
 | **LP Init** | 5% | 1,050,000,000 | Initial liquidity, LP locked 900 days |
 | **Vault** | 5% | 1,050,000,000 | Operations + Paymaster gas subsidies |
 
@@ -98,7 +98,7 @@ No halving cliffs. Daily emission decays by 0.1% per day:
 
 $$E_d = E_1 \times 0.999^{d-1}$$
 
-Where $E_1 = 15,750,000$ AGC. This creates a perfectly smooth deflationary curve.
+Where $E_1 = 17,850,000$ AGC. This creates a perfectly smooth deflationary curve.
 
 ### Dynamic Difficulty (Two-Phase)
 

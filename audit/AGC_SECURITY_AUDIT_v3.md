@@ -105,7 +105,7 @@ An ERC-20 token implementing a **proof-of-useful-work** mining model for AI agen
   - Option A (with ETH): 2% immediate + 15% LP provision + 83% vested over 83 days
   - Option B (no ETH): 2% immediate only; remaining 98% effectively burned (never minted)
 - **Vesting:** 83-day linear vesting with weighted-average duration merging when new rewards arrive. LP NFT is locked until vesting completes.
-- **Ecosystem Fund:** 15% of total supply (3.15B AGC) pre-minted to the contract, released linearly over 900 days (~2.46 years).
+- **Ecosystem Fund:** 5% of total supply (1.05B AGC) pre-minted to the contract, released linearly over 900 days (~2.46 years).
 - **Likwid Integration:** 15% of Option A rewards automatically added as ETH/AGC liquidity on Likwid Protocol.
 
 ### 4.2 AgentPaymaster.sol
@@ -121,8 +121,8 @@ An ERC-4337 paymaster that enables gasless transactions for AGC holders:
 
 | Allocation | Amount | Percentage | Mechanism |
 |------------|--------|------------|-----------|
-| Mining | 15,750,000,000 | 75% | Proof-of-useful-work with smooth decay |
-| Ecosystem Fund | 3,150,000,000 | 15% | 900-day linear vesting from contract |
+| Mining | 17,850,000,000 | 85% | Proof-of-useful-work with smooth decay |
+| Ecosystem Fund | 1,050,000,000 | 5% | 900-day linear vesting from contract |
 | LP Initial | 1,050,000,000 | 5% | Minted to deployer at construction |
 | Vault | 1,050,000,000 | 5% | Minted to deployer at construction |
 | **Total** | **21,000,000,000** | **100%** | — |
@@ -371,7 +371,7 @@ If gas costs change due to future EIPs or network conditions, this value cannot 
 
 #### I-4: `totalSupply()` Includes Unmined and Unvested Tokens
 
-At deployment, `totalSupply()` = `LP_INITIAL_ALLOCATION + VAULT_ALLOCATION + ECOSYSTEM_FUND_ALLOCATION` = 5,250,000,000 AGC (25% of max supply). This includes the ecosystem fund sitting in the contract, which may appear as circulating supply on block explorers and DeFi aggregators.
+At deployment, `totalSupply()` = `LP_INITIAL_ALLOCATION + VAULT_ALLOCATION + ECOSYSTEM_FUND_ALLOCATION` = 3,150,000,000 AGC (15% of max supply). This includes the ecosystem fund sitting in the contract, which may appear as circulating supply on block explorers and DeFi aggregators.
 
 **Recommendation:** Frontend and analytics integrations should subtract `balanceOf(address(agc))` from `totalSupply()` to display accurate circulating supply.
 
@@ -385,7 +385,7 @@ The v3 refactor removed the LayerZero OFT inheritance, simplifying the contract 
 
 #### I-6: Ecosystem Fund 900-Day Vesting Timeline
 
-The 15% ecosystem fund (3,150,000,000 AGC) vests linearly over 900 days (~2.46 years) to an owner-specified recipient. Community stakeholders should be aware of this release schedule.
+The 5% ecosystem fund (1,050,000,000 AGC) vests linearly over 900 days (~2.46 years) to an owner-specified recipient. Community stakeholders should be aware of this release schedule.
 
 ---
 

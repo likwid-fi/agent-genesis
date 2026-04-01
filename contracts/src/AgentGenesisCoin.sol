@@ -38,8 +38,8 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
     uint256 public constant MAX_SUPPLY = 21_000_000_000 ether;
     uint256 public constant LP_INITIAL_ALLOCATION = 1_050_000_000 ether; // 5%
     uint256 public constant VAULT_ALLOCATION = 1_050_000_000 ether; // 5%
-    uint256 public constant ECOSYSTEM_FUND_ALLOCATION = 3_150_000_000 ether; // 15%
-    uint256 public constant MINING_ALLOCATION = 15_750_000_000 ether; // 75%
+    uint256 public constant ECOSYSTEM_FUND_ALLOCATION = 1_050_000_000 ether; // 5%
+    uint256 public constant MINING_ALLOCATION = 17_850_000_000 ether; // 85%
 
     uint256 public constant DEFAULT_LAST_SCORE = 100000; // Default score for first-time miners to prevent zero rewards
     uint256 public constant MAX_SCORE = 1000; // Maximum score per mine
@@ -52,9 +52,9 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
     uint24 public constant POOL_MARGIN_FEE = 3000; // 0.3%
 
     // --- Dynamic Reward State ---
-    uint256 public baseReward = 15_750_000 ether; // 0.1% of MINING_ALLOCATION
+    uint256 public baseReward = 17_850_000 ether; // 0.1% of MINING_ALLOCATION
     uint256 public minedTotal = 0;
-    uint256 public nextDecayThreshold = 15_750_000 ether;
+    uint256 public nextDecayThreshold = 17_850_000 ether;
 
     // --- Ecosystem Fund State ---
     uint256 public ecosystemFundStartTime;
