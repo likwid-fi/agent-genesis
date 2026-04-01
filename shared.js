@@ -233,6 +233,8 @@ async function getSmartAccount(signer) {
 // ======================= USER OPERATION =======================
 
 async function runUserOp(account, calls, description) {
+  let payingWithETH = false;
+
   const smartAccountClient = createSmartAccountClient({
     account,
     entryPoint: ENTRY_POINT_ADDRESS,
@@ -242,13 +244,47 @@ async function runUserOp(account, calls, description) {
       sponsorUserOperation: async ({ userOperation }) => {
         console.log(`> Estimating gas and attaching custom paymaster (${description})...`);
         const fallbackGasPrices = await getBundlerGasPrice();
-        const estimate = await getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices);
 
-        return {
-          ...estimate,
-          verificationGasLimit:
-            BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
-        };
+        // Try with AGC paymaster first (handles both AGC gas payment and free mine)
+        try {
+          const estimate = await getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices);
+          return {
+            ...estimate,
+            verificationGasLimit:
+              BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
+          };
+        } catch (paymasterError) {
+          // Paymaster failed (likely insufficient AGC balance) — fall back to direct ETH payment
+          console.log(`> ⚠️  Paymaster estimation failed: ${(paymasterError.message || "").slice(0, 120)}`);
+          console.log(`> Falling back to direct ETH gas payment from smart account...`);
+
+          const ethBalance = await publicClient.getBalance({ address: account.address });
+          if (ethBalance === 0n) {
+            throw new Error(
+              "Insufficient AGC for paymaster AND no ETH in smart account. " +
+              "Please deposit ETH or AGC to your smart account before retrying.",
+            );
+          }
+          console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
+
+          // Estimate gas without paymaster — EntryPoint will charge smart account ETH directly
+          const opToEstimate = {
+            ...userOperation,
+            maxFeePerGas: fallbackGasPrices.maxFeePerGas,
+            maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
+          };
+          const estimate = await estimateUserOperationGas(opToEstimate);
+
+          payingWithETH = true;
+          return {
+            ...estimate,
+            maxFeePerGas: fallbackGasPrices.maxFeePerGas,
+            maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
+            verificationGasLimit:
+              BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
+            // No paymasterAndData — smart account pays ETH gas natively via EntryPoint
+          };
+        }
       },
     },
   });
@@ -266,7 +302,8 @@ async function runUserOp(account, calls, description) {
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
     const receipt = await waitForUserOperationReceipt(userOpHash, 120_000);
-    console.log(`\n> ✅ ${description} Successful! Tx Hash: ${receipt.receipt.transactionHash}`);
+    const gasNote = payingWithETH ? " (gas paid in ETH)" : " (gas paid in AGC)";
+    console.log(`\n> ✅ ${description} Successful!${gasNote} Tx Hash: ${receipt.receipt.transactionHash}`);
     return receipt;
   } catch (e) {
     const errMsg = e.message || String(e);
@@ -277,7 +314,7 @@ async function runUserOp(account, calls, description) {
       console.log(`> Possible causes:`);
       console.log(`>   1. Collateral amount too small (try a larger amount)`);
       console.log(`>   2. Insufficient token balance or allowance`);
-      console.log(`>   3. Paymaster out of funds (check AGC balance for gas sponsorship)`);
+      console.log(`>   3. Insufficient AGC for paymaster AND insufficient ETH for direct gas payment`);
       console.log(`>   4. Contract rejected the operation (invalid params or pool state)`);
       console.log(`>`);
       console.log(`> Technical detail: ${errMsg.slice(0, 200)}`);
