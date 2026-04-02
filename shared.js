@@ -88,27 +88,42 @@ const AGENT_PAYMASTER_ABI = parseAbi(["function hasFreeMined(address user) exter
 
 const LIKWID_PAIR_ABI = parseAbi([
   "function exactInput((bytes32 poolId, bool zeroForOne, address to, uint256 amountIn, uint256 amountOutMin, uint256 deadline) params) external payable returns (uint24 swapFee, uint256 feeAmount, uint256 amountOut)",
+  "function exactOutput((bytes32 poolId, bool zeroForOne, address to, uint256 amountInMax, uint256 amountOut, uint256 deadline) params) external payable returns (uint24 swapFee, uint256 feeAmount, uint256 amountIn)",
   "function addLiquidity((address currency0, address currency1, uint24 fee, uint24 marginFee) key, address recipient, uint256 amount0, uint256 amount1, uint256 amount0Min, uint256 amount1Min, uint256 deadline) external payable returns (uint256 tokenId, uint128 liquidity)",
+  "function increaseLiquidity(uint256 tokenId, uint256 amount0, uint256 amount1, uint256 amount0Min, uint256 amount1Min, uint256 deadline) external payable returns (uint128 liquidity)",
   "function removeLiquidity(uint256 tokenId, uint128 liquidity, uint256 amount0Min, uint256 amount1Min, uint256 deadline) external returns (uint256 amount0, uint256 amount1)",
+  "function donate(bytes32 poolId, uint256 amount0, uint256 amount1, uint256 deadline) external",
   "function getPositionState(uint256 positionId) external view returns ((uint128 liquidity, uint256 totalInvestment) state)",
+  "function vault() external view returns (address)",
   "function nextId() external view returns (uint256)",
+  "function poolIds(uint256 tokenId) external view returns (bytes32 poolId)",
+  "function poolKeys(bytes32 poolId) external view returns (address currency0, address currency1, uint24 fee, uint24 marginFee)",
   "function ownerOf(uint256 tokenId) external view returns (address)",
 ]);
 
 const LIKWID_MARGIN_ABI = parseAbi([
   "function addMargin((address currency0, address currency1, uint24 fee, uint24 marginFee) key, (bool marginForOne, uint24 leverage, uint256 marginAmount, uint256 borrowAmount, uint256 borrowAmountMax, address recipient, uint256 deadline) params) external payable returns (uint256 tokenId, uint256 borrowAmount, uint256 swapFeeAmount)",
+  "function margin((uint256 tokenId, uint24 leverage, uint256 marginAmount, uint256 borrowAmount, uint256 borrowAmountMax, uint256 deadline) params) external payable returns (uint256 borrowAmount, uint256 swapFeeAmount)",
   "function close(uint256 tokenId, uint24 closeMillionth, uint256 closeAmountMin, uint256 deadline) external",
   "function liquidateBurn(uint256 tokenId, uint256 deadline) external returns (uint256 profit)",
   "function getPositionState(uint256 tokenId) external view returns ((bool marginForOne, uint128 marginAmount, uint128 marginTotal, uint256 depositCumulativeLast, uint128 debtAmount, uint256 borrowCumulativeLast) state)",
   "function nextId() external view returns (uint256)",
+  "function poolIds(uint256 tokenId) external view returns (bytes32 poolId)",
+  "function poolKeys(bytes32 poolId) external view returns (address currency0, address currency1, uint24 fee, uint24 marginFee)",
   "function ownerOf(uint256 tokenId) external view returns (address)",
 ]);
 
 const LIKWID_LEND_ABI = parseAbi([
   "function addLending((address currency0, address currency1, uint24 fee, uint24 marginFee) key, bool lendForOne, address recipient, uint256 amount, uint256 deadline) external payable returns (uint256 tokenId)",
+  "function deposit(uint256 tokenId, uint256 amount, uint256 deadline) external payable",
   "function withdraw(uint256 tokenId, uint256 amount, uint256 deadline) external",
+  "function exactInput((bool zeroForOne, uint256 tokenId, uint256 amountIn, uint256 amountOutMin, uint256 deadline) params) external payable returns (uint24 swapFee, uint256 feeAmount, uint256 amountOut)",
+  "function exactOutput((bool zeroForOne, uint256 tokenId, uint256 amountInMax, uint256 amountOut, uint256 deadline) params) external payable returns (uint24 swapFee, uint256 feeAmount, uint256 amountIn)",
   "function getPositionState(uint256 positionId) external view returns ((uint128 lendAmount, uint256 depositCumulativeLast) state)",
   "function nextId() external view returns (uint256)",
+  "function poolIds(uint256 tokenId) external view returns (bytes32 poolId)",
+  "function poolKeys(bytes32 poolId) external view returns (address currency0, address currency1, uint24 fee, uint24 marginFee)",
+  "function lendDirections(uint256 tokenId) external view returns (bool lendForOne)",
   "function ownerOf(uint256 tokenId) external view returns (address)",
 ]);
 
@@ -307,44 +322,8 @@ async function runUserOp(account, calls, description) {
           ]
             .filter(Boolean)
             .join(" | ");
-
-          const normalizedPaymasterError = paymasterErrorMessage.toLowerCase();
-          const shouldFallbackToEth = isPaymasterFallbackableError(normalizedPaymasterError);
-
-          if (!shouldFallbackToEth) {
-            throw paymasterError;
-          }
-
-          // Paymaster failed because AGC funding/approval is missing — fall back to direct ETH payment
-          console.log(`> ⚠️  Paymaster AGC charge failed: ${paymasterErrorMessage.slice(0, 160)}`);
-          console.log(`> Falling back to direct ETH gas payment from smart account...`);
-
-          const ethBalance = await publicClient.getBalance({ address: account.address });
-          if (ethBalance === 0n) {
-            throw new Error(
-              "Insufficient AGC for paymaster AND no ETH in smart account. " +
-                "Please deposit ETH or AGC to your smart account before retrying.",
-            );
-          }
-          console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
-
-          // Estimate gas without paymaster — EntryPoint will charge smart account ETH directly
-          const opToEstimate = {
-            ...userOperation,
-            maxFeePerGas: fallbackGasPrices.maxFeePerGas,
-            maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
-          };
-          const estimate = await estimateUserOperationGas(opToEstimate);
-
-          gasPaymentMode = "eth";
-          return {
-            ...estimate,
-            maxFeePerGas: fallbackGasPrices.maxFeePerGas,
-            maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
-            verificationGasLimit:
-              BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
-            // No paymasterAndData — smart account pays ETH gas natively via EntryPoint
-          };
+          console.log(`> ⚠️  Paymaster estimation/attachment failed: ${paymasterErrorMessage.slice(0, 160)}`);
+          throw paymasterError;
         }
       },
     },
@@ -369,7 +348,7 @@ async function runUserOp(account, calls, description) {
   try {
     const callData = await account.encodeCallData(encodedCalls);
     let userOpHash;
-    const operationRequiredAgc = getOperationRequiredAgc(calls);
+    const operationRequiredAgc = await getOperationRequiredAgc(calls);
     const operationRequiredEth = getOperationRequiredEth(calls);
 
     try {
@@ -448,65 +427,31 @@ async function runUserOp(account, calls, description) {
         userOperation: { callData },
       });
 
-    try {
-      if (preferredGasMode === "eth") {
-        console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
-        if (estimatedDirectEthCost !== null) {
-          console.log(`> Estimated direct ETH gas required: ${Number(estimatedDirectEthCost) / 1e18} ETH`);
-        }
-        if (operationRequiredEth > 0n) {
-          console.log(`> ETH required by operation: ${Number(operationRequiredEth) / 1e18} ETH`);
-        }
-        console.log("> Using direct ETH gas payment first...");
-        userOpHash = await submitWithEth();
-      } else {
-        console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
-        console.log(`> Smart account AGC balance: ${Number(agcBalance) / 1e18} AGC`);
-        if (!canUseFreeMine) {
-          console.log(`> Required AGC for operation: ${Number(operationRequiredAgc) / 1e18} AGC`);
-          if (!paymasterEstimateSucceeded) {
-            console.log("> Checking paymaster estimate...");
-            const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient);
-            estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
-            paymasterEstimateSucceeded = true;
-          }
-          console.log(`> Estimated AGC precharge: ${Number(estimatedAgcPrecharge) / 1e18} AGC`);
-        }
-        userOpHash = await submitWithPaymaster();
+    if (preferredGasMode === "eth") {
+      console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
+      if (estimatedDirectEthCost !== null) {
+        console.log(`> Estimated direct ETH gas required: ${Number(estimatedDirectEthCost) / 1e18} ETH`);
       }
-    } catch (submitError) {
-      const normalizedSubmitError = getNormalizedErrorMessage(submitError);
-
-      if (preferredGasMode === "eth") {
-        if (!isEthFallbackableError(normalizedSubmitError)) {
-          throw submitError;
-        }
-
-        console.log(`> ⚠️  ETH gas submit failed: ${normalizedSubmitError.slice(0, 160)}`);
-        console.log("> Retrying with paymaster / AGC gas coverage...");
-        if (!canUseFreeMine && !paymasterEstimateSucceeded) {
+      if (operationRequiredEth > 0n) {
+        console.log(`> ETH required by operation: ${Number(operationRequiredEth) / 1e18} ETH`);
+      }
+      console.log("> Using direct ETH gas payment...");
+      userOpHash = await submitWithEth();
+    } else {
+      console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
+      console.log(`> Smart account AGC balance: ${Number(agcBalance) / 1e18} AGC`);
+      if (!canUseFreeMine) {
+        console.log(`> Required AGC for operation: ${Number(operationRequiredAgc) / 1e18} AGC`);
+        if (!paymasterEstimateSucceeded) {
+          console.log("> Checking paymaster estimate...");
           const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient);
           estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
           paymasterEstimateSucceeded = true;
-          console.log(`> Estimated AGC precharge: ${Number(estimatedAgcPrecharge) / 1e18} AGC`);
         }
-        userOpHash = await submitWithPaymaster();
-      } else {
-        if (!isPaymasterFallbackableError(normalizedSubmitError)) {
-          throw submitError;
-        }
-
-        console.log(`> ⚠️  Paymaster submit failed: ${normalizedSubmitError.slice(0, 160)}`);
-        console.log(`> Retrying with direct ETH gas payment from smart account...`);
-
-        ethBalance = await publicClient.getBalance({ address: account.address });
-        const directEthFallbackNeed = (estimatedDirectEthCost || 0n) + operationRequiredEth;
-        if (ethBalance < directEthFallbackNeed) {
-          throw new Error("CLI_PAYMASTER_UNAVAILABLE");
-        }
-
-        userOpHash = await submitWithEth();
+        console.log(`> Estimated AGC precharge: ${Number(estimatedAgcPrecharge) / 1e18} AGC`);
       }
+      console.log("> Using AGC / paymaster gas payment...");
+      userOpHash = await submitWithPaymaster();
     }
 
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
@@ -559,11 +504,6 @@ async function runUserOp(account, calls, description) {
       console.log(`> Required:  ${fields.required} AGC`);
       console.log(`> Available: ${fields.available} AGC`);
       console.log(`> Shortfall: ${fields.shortfall} AGC`);
-      return null;
-    }
-    if (errMsg === "CLI_PAYMASTER_UNAVAILABLE") {
-      console.log(`> ❌ ${description} aborted.`);
-      console.log(`> Paymaster sponsorship is unavailable, and direct ETH gas is also insufficient.`);
       return null;
     }
     if (errMsg.startsWith("CLI_USEROP_REVERTED|")) {
@@ -635,36 +575,6 @@ function isFreeMineOperation(calls) {
   return calls.length > 0 && calls.every(isFreeMineCall);
 }
 
-function isPaymasterFallbackableError(normalizedPaymasterError) {
-  return (
-    normalizedPaymasterError.includes("erc20insufficientbalance") ||
-    normalizedPaymasterError.includes("erc20insufficientallowance") ||
-    normalizedPaymasterError.includes("safeerc20failedoperation") ||
-    normalizedPaymasterError.includes("erc20: insufficient allowance") ||
-    normalizedPaymasterError.includes("erc20: transfer amount exceeds balance") ||
-    normalizedPaymasterError.includes("erc20: transfer amount exceeds allowance") ||
-    normalizedPaymasterError.includes("transfer amount exceeds balance") ||
-    normalizedPaymasterError.includes("transfer amount exceeds allowance") ||
-    normalizedPaymasterError.includes("validatepaymasteruserop") ||
-    (normalizedPaymasterError.includes("paymaster") && normalizedPaymasterError.includes("revert")) ||
-    (normalizedPaymasterError.includes("paymaster") && normalizedPaymasterError.includes("out of gas"))
-  );
-}
-
-function isEthFallbackableError(normalizedEthError) {
-  return (
-    normalizedEthError.includes("didn't pay prefund") ||
-    normalizedEthError.includes("did not pay prefund") ||
-    normalizedEthError.includes("prefund") ||
-    normalizedEthError.includes("insufficient funds") ||
-    normalizedEthError.includes("insufficient balance") ||
-    normalizedEthError.includes("sender balance") ||
-    normalizedEthError.includes("aa21") ||
-    normalizedEthError.includes("aa51") ||
-    normalizedEthError.includes("deposit too low")
-  );
-}
-
 function getRequiredPrefundForUserOperation(userOperation, hasPaymaster = false) {
   const callGasLimit = BigInt(userOperation.callGasLimit ?? 0n);
   const verificationGasLimit = BigInt(userOperation.verificationGasLimit ?? 0n);
@@ -723,7 +633,103 @@ async function estimateAgcPrechargeFromPaymasterEstimate(paymasterEstimate) {
   return estimateAgcPrechargeFromRequiredEth((requiredEthPrefund * 31n) / 10n);
 }
 
-function getOperationRequiredAgc(calls) {
+async function getPoolKey(poolId) {
+  if (poolId === POOL_ID) {
+    return POOL_KEY;
+  }
+  try {
+    return await publicClient.readContract({
+      address: LIKWID_PAIR_POSITION,
+      abi: LIKWID_PAIR_ABI,
+      functionName: "poolKeys",
+      args: [poolId],
+    });
+  } catch (error) {
+    throw new Error(
+      `Failed to read poolKeys(${poolId.toString()}) from ${LIKWID_PAIR_POSITION}: ${getNormalizedErrorMessage(error)}`,
+    );
+  }
+}
+
+async function getPoolKeyByTokenId(address, abi, tokenId) {
+  let poolId;
+  try {
+    poolId = await publicClient.readContract({
+      address,
+      abi,
+      functionName: "poolIds",
+      args: [tokenId],
+    });
+  } catch (error) {
+    throw new Error(`Failed to read poolIds(${tokenId.toString()}) from ${address}: ${getNormalizedErrorMessage(error)}`);
+  }
+  return getPoolKey(poolId);
+}
+
+function getAgcAmountFromPairLiquidity(poolKey, amount0, amount1) {
+  const agcAddress = AGC_TOKEN_ADDRESS.toLowerCase();
+  const currency0 =
+    typeof poolKey?.currency0 === "string"
+      ? poolKey.currency0.toLowerCase()
+      : typeof poolKey?.[0] === "string"
+        ? poolKey[0].toLowerCase()
+        : null;
+  const currency1 =
+    typeof poolKey?.currency1 === "string"
+      ? poolKey.currency1.toLowerCase()
+      : typeof poolKey?.[1] === "string"
+        ? poolKey[1].toLowerCase()
+        : null;
+  let requiredAgc = 0n;
+
+  if (currency0 === agcAddress) {
+    requiredAgc += BigInt(amount0 ?? 0n);
+  }
+  if (currency1 === agcAddress) {
+    requiredAgc += BigInt(amount1 ?? 0n);
+  }
+
+  return requiredAgc;
+}
+
+function poolKeyIncludesAgc(poolKey) {
+  const agcAddress = AGC_TOKEN_ADDRESS.toLowerCase();
+  const currency0 =
+    typeof poolKey?.currency0 === "string"
+      ? poolKey.currency0.toLowerCase()
+      : typeof poolKey?.[0] === "string"
+        ? poolKey[0].toLowerCase()
+        : null;
+  const currency1 =
+    typeof poolKey?.currency1 === "string"
+      ? poolKey.currency1.toLowerCase()
+      : typeof poolKey?.[1] === "string"
+        ? poolKey[1].toLowerCase()
+        : null;
+  return (
+    currency0 === agcAddress ||
+    currency1 === agcAddress
+  );
+}
+
+function getAgcAmountFromDirectionalAmount(poolKey, useCurrency1, amount) {
+  const currency = useCurrency1
+    ? typeof poolKey?.currency1 === "string"
+      ? poolKey.currency1
+      : poolKey?.[1]
+    : typeof poolKey?.currency0 === "string"
+      ? poolKey.currency0
+      : poolKey?.[0];
+  return typeof currency === "string" && currency.toLowerCase() === AGC_TOKEN_ADDRESS.toLowerCase()
+    ? BigInt(amount ?? 0n)
+    : 0n;
+}
+
+function getAgcAmountFromPairSwapInput(poolKey, zeroForOne, amountIn) {
+  return getAgcAmountFromDirectionalAmount(poolKey, !zeroForOne, amountIn);
+}
+
+async function getOperationRequiredAgc(calls) {
   const callList = Array.isArray(calls) ? calls : [calls];
   let requiredAgc = 0n;
 
@@ -733,34 +739,113 @@ function getOperationRequiredAgc(calls) {
     const target = call.to.toLowerCase();
 
     if (target === LIKWID_PAIR_POSITION.toLowerCase()) {
+      let decoded;
       try {
-        const decoded = decodeFunctionData({ abi: LIKWID_PAIR_ABI, data: call.data });
-        if (decoded.functionName === "exactInput" && decoded.args?.[0] && decoded.args[0].zeroForOne === false) {
-          requiredAgc += BigInt(decoded.args[0].amountIn ?? 0n);
-        } else if (decoded.functionName === "addLiquidity" && decoded.args?.[3] !== undefined) {
-          requiredAgc += BigInt(decoded.args[3] ?? 0n);
-        }
-      } catch {}
+        decoded = decodeFunctionData({ abi: LIKWID_PAIR_ABI, data: call.data });
+      } catch {
+        continue;
+      }
+
+      if (decoded.functionName === "exactInput" && decoded.args?.[0]) {
+        const params = decoded.args[0];
+        const poolKey = await getPoolKey(params.poolId);
+        requiredAgc += getAgcAmountFromPairSwapInput(poolKey, params.zeroForOne, params.amountIn);
+      } else if (decoded.functionName === "exactOutput" && decoded.args?.[0]) {
+        const params = decoded.args[0];
+        const poolKey = await getPoolKey(params.poolId);
+        requiredAgc += getAgcAmountFromPairSwapInput(poolKey, params.zeroForOne, params.amountInMax);
+      } else if (decoded.functionName === "addLiquidity" && decoded.args?.[0]) {
+        requiredAgc += getAgcAmountFromPairLiquidity(decoded.args[0], decoded.args[2], decoded.args[3]);
+      } else if (decoded.functionName === "increaseLiquidity" && decoded.args?.[0] !== undefined) {
+        const poolKey = await getPoolKeyByTokenId(LIKWID_PAIR_POSITION, LIKWID_PAIR_ABI, decoded.args[0]);
+        requiredAgc += getAgcAmountFromPairLiquidity(poolKey, decoded.args[1], decoded.args[2]);
+      } else if (decoded.functionName === "donate" && decoded.args?.[0]) {
+        const poolKey = await getPoolKey(decoded.args[0]);
+        requiredAgc += getAgcAmountFromPairLiquidity(poolKey, decoded.args[1], decoded.args[2]);
+      }
       continue;
     }
 
     if (target === LIKWID_MARGIN_POSITION.toLowerCase()) {
+      let decoded;
       try {
-        const decoded = decodeFunctionData({ abi: LIKWID_MARGIN_ABI, data: call.data });
-        if (decoded.functionName === "addMargin" && decoded.args?.[1]?.marginForOne) {
-          requiredAgc += BigInt(decoded.args[1].marginAmount ?? 0n);
+        decoded = decodeFunctionData({ abi: LIKWID_MARGIN_ABI, data: call.data });
+      } catch {
+        continue;
+      }
+
+      if (decoded.functionName === "addMargin" && decoded.args?.[0] && decoded.args?.[1]) {
+        requiredAgc += getAgcAmountFromDirectionalAmount(
+          decoded.args[0],
+          decoded.args[1].marginForOne,
+          decoded.args[1].marginAmount,
+        );
+      } else if (decoded.functionName === "margin" && decoded.args?.[0]) {
+        const params = decoded.args[0];
+        let position;
+        try {
+          position = await publicClient.readContract({
+            address: LIKWID_MARGIN_POSITION,
+            abi: LIKWID_MARGIN_ABI,
+            functionName: "getPositionState",
+            args: [params.tokenId],
+          });
+        } catch (error) {
+          throw new Error(
+            `Failed to read margin position state(${params.tokenId.toString()}) from ${LIKWID_MARGIN_POSITION}: ${getNormalizedErrorMessage(error)}`,
+          );
         }
-      } catch {}
+        const poolKey = await getPoolKeyByTokenId(LIKWID_MARGIN_POSITION, LIKWID_MARGIN_ABI, params.tokenId);
+        if (!poolKeyIncludesAgc(poolKey)) {
+          continue;
+        }
+        requiredAgc += getAgcAmountFromDirectionalAmount(poolKey, position.marginForOne, params.marginAmount);
+      }
       continue;
     }
 
     if (target === LIKWID_LEND_POSITION.toLowerCase()) {
+      let decoded;
       try {
-        const decoded = decodeFunctionData({ abi: LIKWID_LEND_ABI, data: call.data });
-        if (decoded.functionName === "addLending" && decoded.args?.[1] === true) {
-          requiredAgc += BigInt(decoded.args[3] ?? 0n);
+        decoded = decodeFunctionData({ abi: LIKWID_LEND_ABI, data: call.data });
+      } catch {
+        continue;
+      }
+
+      if (decoded.functionName === "addLending" && decoded.args?.[0]) {
+        requiredAgc += getAgcAmountFromDirectionalAmount(decoded.args[0], decoded.args[1], decoded.args[3]);
+      } else if (decoded.functionName === "deposit" && decoded.args?.[0] !== undefined) {
+        const tokenId = decoded.args[0];
+        let lendForOne;
+        try {
+          lendForOne = await publicClient.readContract({
+            address: LIKWID_LEND_POSITION,
+            abi: LIKWID_LEND_ABI,
+            functionName: "lendDirections",
+            args: [tokenId],
+          });
+        } catch (error) {
+          throw new Error(
+            `Failed to read lendDirections(${tokenId.toString()}) from ${LIKWID_LEND_POSITION}: ${getNormalizedErrorMessage(error)}`,
+          );
         }
-      } catch {}
+        const poolKey = await getPoolKeyByTokenId(LIKWID_LEND_POSITION, LIKWID_LEND_ABI, tokenId);
+        if (!poolKeyIncludesAgc(poolKey)) {
+          continue;
+        }
+        requiredAgc += getAgcAmountFromDirectionalAmount(poolKey, lendForOne, decoded.args[1]);
+      } else if ((decoded.functionName === "exactInput" || decoded.functionName === "exactOutput") && decoded.args?.[0]) {
+        const params = decoded.args[0];
+        const poolKey = await getPoolKeyByTokenId(LIKWID_LEND_POSITION, LIKWID_LEND_ABI, params.tokenId);
+        if (!poolKeyIncludesAgc(poolKey)) {
+          continue;
+        }
+        requiredAgc += getAgcAmountFromPairSwapInput(
+          poolKey,
+          params.zeroForOne,
+          decoded.functionName === "exactInput" ? params.amountIn : params.amountInMax,
+        );
+      }
     }
   }
 
