@@ -76,16 +76,16 @@ const _sepoliaCfg = CONFIG.chains.sepolia;
 const CHAIN = sepolia;
 const NETWORK_NAME = CHAIN.name;
 const CHAIN_ID = CHAIN.id;
-const RPC_URL = process.env.SEPOLIA_RPC || _sepoliaCfg.rpc;
-const BUNDLER_URL = process.env.BUNDLER_URL || _sepoliaCfg.bundler;
+const RPC_URL = _sepoliaCfg.rpc;
+const BUNDLER_URL = _sepoliaCfg.bundler;
 
-const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || _sepoliaCfg.agc.token;
-const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || _sepoliaCfg.agc.paymaster;
+const AGC_TOKEN_ADDRESS = _sepoliaCfg.agc.token;
+const AGENT_PAYMASTER_ADDRESS = _sepoliaCfg.agc.paymaster;
 
-const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || _sepoliaCfg.contracts.LikwidHelper;
-const LIKWID_PAIR_POSITION = process.env.LIKWID_PAIR_POSITION || _sepoliaCfg.contracts.LikwidPairPosition;
-const LIKWID_MARGIN_POSITION = process.env.LIKWID_MARGIN_POSITION || _sepoliaCfg.contracts.LikwidMarginPosition;
-const LIKWID_LEND_POSITION = process.env.LIKWID_LEND_POSITION || _sepoliaCfg.contracts.LikwidLendPosition;
+const LIKWID_HELPER_ADDRESS = _sepoliaCfg.contracts.LikwidHelper;
+const LIKWID_PAIR_POSITION = _sepoliaCfg.contracts.LikwidPairPosition;
+const LIKWID_MARGIN_POSITION = _sepoliaCfg.contracts.LikwidMarginPosition;
+const LIKWID_LEND_POSITION = _sepoliaCfg.contracts.LikwidLendPosition;
 
 const POOL_KEY = {
   currency0: NATIVE_TOKEN_ADDRESS,
