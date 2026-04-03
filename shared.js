@@ -42,7 +42,6 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 // Load config from likwid_tokens.json
 const CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
 
-const VERIFIER_URL = CONFIG.infrastructure.verifierUrl;
 const ENTRY_POINT_ADDRESS = ENTRYPOINT_ADDRESS_V06; // EntryPoint v0.6
 const SMART_ACCOUNT_FACTORY_ADDRESS = CONFIG.infrastructure.smartAccountFactory;
 
@@ -1772,7 +1771,6 @@ module.exports = {
   // Config
   NETWORK_NAME,
   CHAIN_ID,
-  VERIFIER_URL,
   RPC_URL,
   BUNDLER_URL,
   WALLET_FILE,

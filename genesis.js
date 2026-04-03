@@ -7,7 +7,6 @@
 
 const {
   // Config
-  VERIFIER_URL,
   AGC_TOKEN_ADDRESS,
   AGENT_PAYMASTER_ADDRESS,
   LIKWID_HELPER_ADDRESS,
@@ -46,6 +45,9 @@ const {
 
 const axios = require("axios");
 const { ReclaimClient } = require("@reclaimprotocol/zk-fetch");
+
+// Verifier URL — genesis-specific, not part of shared config
+const VERIFIER_URL = "https://verifier.likwid.fi";
 
 // Load .env config for billing proof
 const { MODEL_TYPE, MODEL_KEY } = loadEnvConfig();
