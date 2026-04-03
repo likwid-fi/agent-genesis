@@ -33,115 +33,60 @@ const path = require("path");
 const os = require("os");
 
 // ======================= CONFIGURATION =======================
-const VERIFIER_URL = "https://verifier.likwid.fi";
+// All chain/contract/token config lives in likwid_tokens.json — the single source of truth.
+const CONFIG_FILE = path.join(__dirname, "likwid_tokens.json");
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
-const CUSTOM_TOKENS_FILE = path.join(os.homedir(), ".openclaw", ".likwid_tokens.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-// ERC-4337 Infrastructure
+// Load config from likwid_tokens.json
+const CONFIG = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+
+const VERIFIER_URL = CONFIG.infrastructure.verifierUrl;
 const ENTRY_POINT_ADDRESS = ENTRYPOINT_ADDRESS_V06; // EntryPoint v0.6
-const SMART_ACCOUNT_FACTORY_ADDRESS = "0x9406Cc6185a346906296840746125a0E44976454";
+const SMART_ACCOUNT_FACTORY_ADDRESS = CONFIG.infrastructure.smartAccountFactory;
 
-// ======================= CHAIN REGISTRY =======================
+// ======================= CHAIN REGISTRY (loaded from likwid_tokens.json) =======================
 
-const CHAIN_REGISTRY = {
-  sepolia: {
-    chain: sepolia,
-    chainId: sepolia.id,
-    rpc: process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com",
-    bundler: process.env.SEPOLIA_BUNDLER || "https://bundler.particle.network",
-    contracts: {
-      LikwidHelper: "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013",
-      LikwidPairPosition: "0xA8296e28c62249f89188De0499a81d6AD993a515",
-      LikwidMarginPosition: "0x6a2666cA9D5769069762225161D454894fCe617c",
-      LikwidLendPosition: "0xd04C34F7F57cAC394eC170C4Fe18A8B0330A2F37",
-    },
-    agc: {
-      token: "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-      paymaster: "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3",
-    },
-    tokens: {
-      ETH: NATIVE_TOKEN_ADDRESS,
-      AGC: "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-    },
-    nativeSymbol: "ETH",
-  },
-  ethereum: {
-    chain: mainnet,
-    chainId: mainnet.id,
-    rpc: process.env.ETHEREUM_RPC || "https://ethereum-rpc.publicnode.com",
-    bundler: process.env.ETHEREUM_BUNDLER || "https://bundler.particle.network",
-    contracts: {
-      LikwidHelper: "0x16a9633f8A777CA733073ea2526705cD8338d510",
-      LikwidPairPosition: "0xB397FE16BE79B082f17F1CD96e6489df19E07BCD",
-      LikwidMarginPosition: "0x6bec0c1dc4898484b7F094566ddf8bC82ED7Abe8",
-      LikwidLendPosition: "0xCE91db5947228bBA595c3CAC49eb24053A06618E",
-      LikwidVault: "0x065d449ec9D139740343990B7E1CF05fA830e4Ba",
-    },
-    agc: null, // No AGC on Ethereum mainnet
-    tokens: {
-      ETH: NATIVE_TOKEN_ADDRESS,
-      USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-      USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-      WBTC: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-    },
-    nativeSymbol: "ETH",
-  },
-  base: {
-    chain: base,
-    chainId: base.id,
-    rpc: process.env.BASE_RPC || "https://base-rpc.publicnode.com",
-    bundler: process.env.BASE_BUNDLER || "https://bundler.particle.network",
-    contracts: {
-      LikwidHelper: ZERO_ADDRESS,
-      LikwidPairPosition: ZERO_ADDRESS,
-      LikwidMarginPosition: ZERO_ADDRESS,
-      LikwidLendPosition: ZERO_ADDRESS,
-    },
-    agc: null, // AGC on Base is planned for future
-    tokens: {
-      ETH: NATIVE_TOKEN_ADDRESS,
-      USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    },
-    nativeSymbol: "ETH",
-  },
-  bnb: {
-    chain: bsc,
-    chainId: bsc.id,
-    rpc: process.env.BNB_RPC || "https://bsc-rpc.publicnode.com",
-    bundler: process.env.BNB_BUNDLER || "https://bundler.particle.network",
-    contracts: {
-      LikwidHelper: ZERO_ADDRESS,
-      LikwidPairPosition: ZERO_ADDRESS,
-      LikwidMarginPosition: ZERO_ADDRESS,
-      LikwidLendPosition: ZERO_ADDRESS,
-    },
-    agc: null, // No AGC on BNB
-    tokens: {
-      BNB: NATIVE_TOKEN_ADDRESS,
-      USDC: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
-    },
-    nativeSymbol: "BNB",
-  },
-};
+// Map viemChain string -> viem chain object
+const VIEM_CHAINS = { sepolia, mainnet, base, bsc };
+
+const CHAIN_REGISTRY = {};
+for (const [key, cfg] of Object.entries(CONFIG.chains)) {
+  const viemChain = VIEM_CHAINS[cfg.viemChain];
+  if (!viemChain) {
+    console.error(`Warning: unknown viemChain "${cfg.viemChain}" for chain "${key}", skipping.`);
+    continue;
+  }
+  CHAIN_REGISTRY[key] = {
+    chain: viemChain,
+    chainId: cfg.chainId,
+    rpc: (cfg.rpcEnv && process.env[cfg.rpcEnv]) || cfg.rpc,
+    bundler: (cfg.bundlerEnv && process.env[cfg.bundlerEnv]) || cfg.bundler,
+    contracts: cfg.contracts || {},
+    agc: cfg.agc || null,
+    tokens: { ...cfg.tokens },
+    nativeSymbol: cfg.nativeSymbol,
+  };
+}
 
 // ======================= LEGACY GLOBALS (for genesis.js compatibility) =======================
-// These are preserved so genesis.js continues to work without changes.
+// These are derived from likwid_tokens.json so genesis.js continues to work without changes.
 
+const _sepoliaCfg = CONFIG.chains.sepolia;
 const CHAIN = sepolia;
 const NETWORK_NAME = CHAIN.name;
 const CHAIN_ID = CHAIN.id;
-const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
-const BUNDLER_URL = process.env.BUNDLER_URL || "https://bundler.particle.network";
+const RPC_URL = process.env.SEPOLIA_RPC || _sepoliaCfg.rpc;
+const BUNDLER_URL = process.env.BUNDLER_URL || _sepoliaCfg.bundler;
 
-const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F";
-const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3";
+const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || _sepoliaCfg.agc.token;
+const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || _sepoliaCfg.agc.paymaster;
 
-const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
-const LIKWID_PAIR_POSITION = process.env.LIKWID_PAIR_POSITION || "0xA8296e28c62249f89188De0499a81d6AD993a515";
-const LIKWID_MARGIN_POSITION = process.env.LIKWID_MARGIN_POSITION || "0x6a2666cA9D5769069762225161D454894fCe617c";
-const LIKWID_LEND_POSITION = process.env.LIKWID_LEND_POSITION || "0xd04C34F7F57cAC394eC170C4Fe18A8B0330A2F37";
+const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || _sepoliaCfg.contracts.LikwidHelper;
+const LIKWID_PAIR_POSITION = process.env.LIKWID_PAIR_POSITION || _sepoliaCfg.contracts.LikwidPairPosition;
+const LIKWID_MARGIN_POSITION = process.env.LIKWID_MARGIN_POSITION || _sepoliaCfg.contracts.LikwidMarginPosition;
+const LIKWID_LEND_POSITION = process.env.LIKWID_LEND_POSITION || _sepoliaCfg.contracts.LikwidLendPosition;
 
 const POOL_KEY = {
   currency0: NATIVE_TOKEN_ADDRESS,
@@ -423,9 +368,9 @@ function getChainContext(chainName) {
     transport: chainBundlerTransport,
   });
 
-  // Merge custom tokens from .likwid_tokens.json
-  const customTokens = loadCustomTokens(key);
-  const allTokens = { ...reg.tokens, ...customTokens };
+  // Re-read tokens from config file to pick up any runtime additions
+  const latestTokens = loadCustomTokens(key);
+  const allTokens = { ...reg.tokens, ...latestTokens };
 
   return {
     name: key,
@@ -579,15 +524,14 @@ function resolvePool(chainCtx, pairStr) {
 // ======================= MULTI-CHAIN: Custom Tokens =======================
 
 /**
- * Load custom tokens for a specific chain from .likwid_tokens.json.
+ * Load the latest tokens for a chain from likwid_tokens.json.
+ * Re-reads the file to pick up any tokens added at runtime.
  */
 function loadCustomTokens(chainName) {
   try {
-    if (!fs.existsSync(CUSTOM_TOKENS_FILE)) return {};
-    const data = JSON.parse(fs.readFileSync(CUSTOM_TOKENS_FILE, "utf8"));
-    const chainData = data[chainName];
-    if (chainData && chainData.tokens) {
-      return chainData.tokens;
+    const data = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    if (data.chains && data.chains[chainName] && data.chains[chainName].tokens) {
+      return data.chains[chainName].tokens;
     }
     return {};
   } catch (e) {
@@ -596,29 +540,32 @@ function loadCustomTokens(chainName) {
 }
 
 /**
- * Save a custom token for a specific chain to .likwid_tokens.json.
+ * Save a custom token for a specific chain to likwid_tokens.json.
+ * Adds it to chains.<chainName>.tokens in the unified config file.
  */
 function saveCustomToken(chainName, symbol, address) {
-  let data = {};
+  let data;
   try {
-    if (fs.existsSync(CUSTOM_TOKENS_FILE)) {
-      data = JSON.parse(fs.readFileSync(CUSTOM_TOKENS_FILE, "utf8"));
-    }
+    data = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
   } catch (e) {
-    data = {};
+    // Should not happen — CONFIG_FILE is required at startup
+    throw new Error(`Cannot read config file: ${CONFIG_FILE}`);
   }
 
-  if (!data[chainName]) {
-    data[chainName] = { tokens: {} };
+  if (!data.chains[chainName]) {
+    throw new Error(`Unknown chain "${chainName}". Add it to likwid_tokens.json first.`);
   }
-  if (!data[chainName].tokens) {
-    data[chainName].tokens = {};
+  if (!data.chains[chainName].tokens) {
+    data.chains[chainName].tokens = {};
   }
-  data[chainName].tokens[symbol.toUpperCase()] = address;
+  data.chains[chainName].tokens[symbol.toUpperCase()] = address;
 
-  const dir = path.dirname(CUSTOM_TOKENS_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(CUSTOM_TOKENS_FILE, JSON.stringify(data, null, 2));
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2));
+
+  // Also update in-memory CHAIN_REGISTRY
+  if (CHAIN_REGISTRY[chainName]) {
+    CHAIN_REGISTRY[chainName].tokens[symbol.toUpperCase()] = address;
+  }
 }
 
 // ======================= MULTI-CHAIN: runUserOp =======================

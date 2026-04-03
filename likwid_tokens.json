@@ -1,0 +1,104 @@
+{
+  "version": "2.2.0",
+  "infrastructure": {
+    "entryPointVersion": "v0.6",
+    "smartAccountFactory": "0x9406Cc6185a346906296840746125a0E44976454",
+    "defaultBundler": "https://bundler.particle.network",
+    "verifierUrl": "https://verifier.likwid.fi"
+  },
+  "chains": {
+    "sepolia": {
+      "chainId": 11155111,
+      "viemChain": "sepolia",
+      "nativeSymbol": "ETH",
+      "status": "live",
+      "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+      "bundler": "https://bundler.particle.network",
+      "rpcEnv": "SEPOLIA_RPC",
+      "bundlerEnv": "SEPOLIA_BUNDLER",
+      "contracts": {
+        "LikwidVault": "0x315663A47d7E95c47370682DfF77415F469C3246",
+        "LikwidHelper": "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013",
+        "LikwidPairPosition": "0xA8296e28c62249f89188De0499a81d6AD993a515",
+        "LikwidMarginPosition": "0x6a2666cA9D5769069762225161D454894fCe617c",
+        "LikwidLendPosition": "0xd04C34F7F57cAC394eC170C4Fe18A8B0330A2F37"
+      },
+      "agc": {
+        "token": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+        "paymaster": "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3"
+      },
+      "tokens": {
+        "ETH": "0x0000000000000000000000000000000000000000",
+        "AGC": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F"
+      }
+    },
+    "ethereum": {
+      "chainId": 1,
+      "viemChain": "mainnet",
+      "nativeSymbol": "ETH",
+      "status": "live",
+      "rpc": "https://ethereum-rpc.publicnode.com",
+      "bundler": "https://bundler.particle.network",
+      "rpcEnv": "ETHEREUM_RPC",
+      "bundlerEnv": "ETHEREUM_BUNDLER",
+      "contracts": {
+        "LikwidVault": "0x065d449ec9D139740343990B7E1CF05fA830e4Ba",
+        "LikwidHelper": "0x16a9633f8A777CA733073ea2526705cD8338d510",
+        "LikwidPairPosition": "0xB397FE16BE79B082f17F1CD96e6489df19E07BCD",
+        "LikwidMarginPosition": "0x6bec0c1dc4898484b7F094566ddf8bC82ED7Abe8",
+        "LikwidLendPosition": "0xCE91db5947228bBA595c3CAC49eb24053A06618E"
+      },
+      "agc": null,
+      "tokens": {
+        "ETH": "0x0000000000000000000000000000000000000000",
+        "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
+      }
+    },
+    "base": {
+      "chainId": 8453,
+      "viemChain": "base",
+      "nativeSymbol": "ETH",
+      "status": "planned",
+      "rpc": "https://base-rpc.publicnode.com",
+      "bundler": "https://bundler.particle.network",
+      "rpcEnv": "BASE_RPC",
+      "bundlerEnv": "BASE_BUNDLER",
+      "contracts": {
+        "LikwidVault": "0x0000000000000000000000000000000000000000",
+        "LikwidHelper": "0x0000000000000000000000000000000000000000",
+        "LikwidPairPosition": "0x0000000000000000000000000000000000000000",
+        "LikwidMarginPosition": "0x0000000000000000000000000000000000000000",
+        "LikwidLendPosition": "0x0000000000000000000000000000000000000000"
+      },
+      "agc": null,
+      "tokens": {
+        "ETH": "0x0000000000000000000000000000000000000000",
+        "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      }
+    },
+    "bnb": {
+      "chainId": 56,
+      "viemChain": "bsc",
+      "nativeSymbol": "BNB",
+      "status": "planned",
+      "rpc": "https://bsc-rpc.publicnode.com",
+      "bundler": "https://bundler.particle.network",
+      "rpcEnv": "BNB_RPC",
+      "bundlerEnv": "BNB_BUNDLER",
+      "contracts": {
+        "LikwidVault": "0x0000000000000000000000000000000000000000",
+        "LikwidHelper": "0x0000000000000000000000000000000000000000",
+        "LikwidPairPosition": "0x0000000000000000000000000000000000000000",
+        "LikwidMarginPosition": "0x0000000000000000000000000000000000000000",
+        "LikwidLendPosition": "0x0000000000000000000000000000000000000000"
+      },
+      "agc": null,
+      "tokens": {
+        "BNB": "0x0000000000000000000000000000000000000000",
+        "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
+      }
+    }
+  }
+}

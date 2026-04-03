@@ -54,34 +54,16 @@ cd ~/.openclaw/skills/agent-genesis && node likwid.js balance --chain sepolia
 
 ---
 
-## 1. Multi-Chain Deployments
+## 1. Multi-Chain Configuration
 
-### Supported Chains & Contract Addresses
+All chain configs, contract addresses, and token lists are stored in a single file:
 
-| Chain | Name | Native | Status |
-|-------|------|--------|--------|
-| `sepolia` | Sepolia Testnet | ETH | ✅ Live — AGC paymaster available |
-| `ethereum` | Ethereum Mainnet | ETH | ✅ Live |
-| `base` | Base | ETH | 🔜 Planned |
-| `bnb` | BNB Chain | BNB | 🔜 Planned |
+**`likwid_tokens.json`** — the single source of truth for all chain/contract/token configuration.
 
-**Ethereum Mainnet Contracts:**
-| Contract | Address |
-|----------|---------|
-| LikwidVault | `0x065d449ec9D139740343990B7E1CF05fA830e4Ba` |
-| LikwidPairPosition | `0xB397FE16BE79B082f17F1CD96e6489df19E07BCD` |
-| LikwidMarginPosition | `0x6bec0c1dc4898484b7F094566ddf8bC82ED7Abe8` |
-| LikwidLendPosition | `0xCE91db5947228bBA595c3CAC49eb24053A06618E` |
-| LikwidHelper | `0x16a9633f8A777CA733073ea2526705cD8338d510` |
-
-**Sepolia Testnet Contracts:**
-| Contract | Address |
-|----------|---------|
-| LikwidVault | `0x315663A47d7E95c47370682DfF77415F469C3246` |
-| LikwidPairPosition | `0xA8296e28c62249f89188De0499a81d6AD993a515` |
-| LikwidMarginPosition | `0x6a2666cA9D5769069762225161D454894fCe617c` |
-| LikwidLendPosition | `0xd04C34F7F57cAC394eC170C4Fe18A8B0330A2F37` |
-| LikwidHelper | `0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013` |
+To see the current supported chains, contracts, and tokens, read `likwid_tokens.json` directly or use:
+```bash
+cd ~/.openclaw/skills/agent-genesis && node likwid.js pools --chain <chain_name>
+```
 
 ### Required Parameters
 
@@ -100,18 +82,9 @@ cd ~/.openclaw/skills/agent-genesis && node likwid.js pools --chain ethereum
 cd ~/.openclaw/skills/agent-genesis && node likwid.js pools --chain sepolia
 ```
 
-### Built-in Tokens Per Chain
-
-| Chain | Tokens |
-|-------|--------|
-| `sepolia` | ETH, AGC |
-| `ethereum` | ETH, USDC, USDT, WBTC |
-| `base` | ETH, USDC |
-| `bnb` | BNB, USDC |
-
 ### Register Custom Tokens
 
-Any ERC-20 token can be added. Custom tokens persist in `~/.openclaw/.likwid_tokens.json`.
+Any ERC-20 token can be added. Custom tokens are saved directly into `likwid_tokens.json` under the chain's `tokens` section.
 
 ```bash
 cd ~/.openclaw/skills/agent-genesis && node likwid.js add_token PEPE 0x6982508145454Ce325dDbE47a25d4ec3d2311933 --chain ethereum
@@ -373,7 +346,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | Command | Description |
 |:---|:---|
 | `pools` | List known tokens on a chain. |
-| `add_token <sym> <addr>` | Add a custom token to .likwid_tokens.json. |
+| `add_token <sym> <addr>` | Add a custom token to likwid_tokens.json. |
 
 ### Position Management (require `--chain` only)
 | Command | Description |

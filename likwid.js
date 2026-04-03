@@ -1192,7 +1192,7 @@ Discovery (require --chain):
   pools                         List known tokens on a chain.
   pool_info                     Show pool state (reserves, fees, utilization).
   price                         Current price for a pool.
-  add_token <sym> <addr>        Add a custom token (saved to .likwid_tokens.json).
+  add_token <sym> <addr>        Add a custom token (saved to likwid_tokens.json).
 
 Protocol: https://likwid.fi | Docs: https://likwidfi.gitbook.io/likwid-protocol-docs
 `);
