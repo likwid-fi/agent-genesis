@@ -11,6 +11,9 @@ const {
   AGC_TOKEN_ADDRESS,
   AGENT_PAYMASTER_ADDRESS,
   LIKWID_HELPER_ADDRESS,
+  LIKWID_PAIR_POSITION,
+  LIKWID_MARGIN_POSITION,
+  LIKWID_LEND_POSITION,
   POOL_KEY,
   POOL_ID,
   WALLET_FILE,
@@ -47,14 +50,11 @@ const { ReclaimClient } = require("@reclaimprotocol/zk-fetch");
 // Load .env config for billing proof
 const { MODEL_TYPE, MODEL_KEY } = loadEnvConfig();
 
-// Import position scanning from likwid.js (used by status command)
+// Import position scanning from likwid.js and contract addresses from shared.js
 const {
   scanUserPositions,
-  LIKWID_MARGIN_POSITION,
   LIKWID_MARGIN_ABI,
-  LIKWID_PAIR_POSITION,
   LIKWID_PAIR_ABI,
-  LIKWID_LEND_POSITION,
   LIKWID_LEND_ABI,
 } = require("./likwid");
 
@@ -211,9 +211,9 @@ async function status() {
   // Scan positions summary (from likwid.js)
   try {
     const [marginPositions, lpPositions, lendPositions] = await Promise.all([
-      scanUserPositions(LIKWID_MARGIN_POSITION, LIKWID_MARGIN_ABI, account.address, 200),
-      scanUserPositions(LIKWID_PAIR_POSITION, LIKWID_PAIR_ABI, account.address, 200),
-      scanUserPositions(LIKWID_LEND_POSITION, LIKWID_LEND_ABI, account.address, 200),
+      scanUserPositions(publicClient, LIKWID_MARGIN_POSITION, LIKWID_MARGIN_ABI, account.address, 200),
+      scanUserPositions(publicClient, LIKWID_PAIR_POSITION, LIKWID_PAIR_ABI, account.address, 200),
+      scanUserPositions(publicClient, LIKWID_LEND_POSITION, LIKWID_LEND_ABI, account.address, 200),
     ]);
 
     if (marginPositions.length > 0 || lpPositions.length > 0 || lendPositions.length > 0) {

@@ -2,7 +2,13 @@
  * shared.js — Shared infrastructure for Agent Genesis skill modules.
  *
  * Provides: viem clients, wallet management, ERC-4337 smart account helpers,
- * UserOperation execution, approval helpers, and common constants/ABIs.
+ * UserOperation execution, approval helpers, chain registry, pool resolution,
+ * token resolution, and common constants/ABIs.
+ *
+ * Multi-chain support: CHAIN_REGISTRY holds per-chain config. Use
+ * getChainContext(chainName) to get a full context for any supported chain.
+ * Legacy globals (POOL_KEY, POOL_ID, publicClient, etc.) are preserved for
+ * backward compatibility with genesis.js.
  */
 
 const { createSmartAccountClient, createBundlerClient, ENTRYPOINT_ADDRESS_V06 } = require("permissionless");
@@ -20,33 +26,118 @@ const {
   keccak256,
   encodeAbiParameters,
 } = require("viem");
-const { sepolia } = require("viem/chains");
+const { sepolia, mainnet, base, bsc } = require("viem/chains");
 const { privateKeyToAccount, generatePrivateKey } = require("viem/accounts");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
 // ======================= CONFIGURATION =======================
-// Network identity — derived from chain config. Update these when switching networks.
-const CHAIN = sepolia;
-const NETWORK_NAME = CHAIN.name; // e.g. "Sepolia", "Base", "Base Sepolia"
-const CHAIN_ID = CHAIN.id; // e.g. 11155111, 8453, 84532
-
 const VERIFIER_URL = "https://verifier.likwid.fi";
-const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
-const BUNDLER_URL = process.env.BUNDLER_URL || "https://bundler.particle.network";
-
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
+const CUSTOM_TOKENS_FILE = path.join(os.homedir(), ".openclaw", ".likwid_tokens.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
-
-const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F";
-const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 // ERC-4337 Infrastructure
 const ENTRY_POINT_ADDRESS = ENTRYPOINT_ADDRESS_V06; // EntryPoint v0.6
 const SMART_ACCOUNT_FACTORY_ADDRESS = "0x9406Cc6185a346906296840746125a0E44976454";
 
-// Likwid DeFi Constants
+// ======================= CHAIN REGISTRY =======================
+
+const CHAIN_REGISTRY = {
+  sepolia: {
+    chain: sepolia,
+    chainId: sepolia.id,
+    rpc: process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com",
+    bundler: process.env.SEPOLIA_BUNDLER || "https://bundler.particle.network",
+    contracts: {
+      LikwidHelper: "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013",
+      LikwidPairPosition: "0xA8296e28c62249f89188De0499a81d6AD993a515",
+      LikwidMarginPosition: "0x6a2666cA9D5769069762225161D454894fCe617c",
+      LikwidLendPosition: "0xd04C34F7F57cAC394eC170C4Fe18A8B0330A2F37",
+    },
+    agc: {
+      token: "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+      paymaster: "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3",
+    },
+    tokens: {
+      ETH: NATIVE_TOKEN_ADDRESS,
+      AGC: "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+    },
+    nativeSymbol: "ETH",
+  },
+  ethereum: {
+    chain: mainnet,
+    chainId: mainnet.id,
+    rpc: process.env.ETHEREUM_RPC || "https://ethereum-rpc.publicnode.com",
+    bundler: process.env.ETHEREUM_BUNDLER || "https://bundler.particle.network",
+    contracts: {
+      LikwidHelper: "0x16a9633f8A777CA733073ea2526705cD8338d510",
+      LikwidPairPosition: "0xB397FE16BE79B082f17F1CD96e6489df19E07BCD",
+      LikwidMarginPosition: "0x6bec0c1dc4898484b7F094566ddf8bC82ED7Abe8",
+      LikwidLendPosition: "0xCE91db5947228bBA595c3CAC49eb24053A06618E",
+      LikwidVault: "0x065d449ec9D139740343990B7E1CF05fA830e4Ba",
+    },
+    agc: null, // No AGC on Ethereum mainnet
+    tokens: {
+      ETH: NATIVE_TOKEN_ADDRESS,
+      USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      WBTC: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+    },
+    nativeSymbol: "ETH",
+  },
+  base: {
+    chain: base,
+    chainId: base.id,
+    rpc: process.env.BASE_RPC || "https://base-rpc.publicnode.com",
+    bundler: process.env.BASE_BUNDLER || "https://bundler.particle.network",
+    contracts: {
+      LikwidHelper: ZERO_ADDRESS,
+      LikwidPairPosition: ZERO_ADDRESS,
+      LikwidMarginPosition: ZERO_ADDRESS,
+      LikwidLendPosition: ZERO_ADDRESS,
+    },
+    agc: null, // AGC on Base is planned for future
+    tokens: {
+      ETH: NATIVE_TOKEN_ADDRESS,
+      USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    },
+    nativeSymbol: "ETH",
+  },
+  bnb: {
+    chain: bsc,
+    chainId: bsc.id,
+    rpc: process.env.BNB_RPC || "https://bsc-rpc.publicnode.com",
+    bundler: process.env.BNB_BUNDLER || "https://bundler.particle.network",
+    contracts: {
+      LikwidHelper: ZERO_ADDRESS,
+      LikwidPairPosition: ZERO_ADDRESS,
+      LikwidMarginPosition: ZERO_ADDRESS,
+      LikwidLendPosition: ZERO_ADDRESS,
+    },
+    agc: null, // No AGC on BNB
+    tokens: {
+      BNB: NATIVE_TOKEN_ADDRESS,
+      USDC: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    },
+    nativeSymbol: "BNB",
+  },
+};
+
+// ======================= LEGACY GLOBALS (for genesis.js compatibility) =======================
+// These are preserved so genesis.js continues to work without changes.
+
+const CHAIN = sepolia;
+const NETWORK_NAME = CHAIN.name;
+const CHAIN_ID = CHAIN.id;
+const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
+const BUNDLER_URL = process.env.BUNDLER_URL || "https://bundler.particle.network";
+
+const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F";
+const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3";
+
 const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
 const LIKWID_PAIR_POSITION = process.env.LIKWID_PAIR_POSITION || "0xA8296e28c62249f89188De0499a81d6AD993a515";
 const LIKWID_MARGIN_POSITION = process.env.LIKWID_MARGIN_POSITION || "0x6a2666cA9D5769069762225161D454894fCe617c";
@@ -134,13 +225,13 @@ const LIKWID_HELPER_ABI = parseAbi([
   "function getPoolStateInfo(bytes32 poolId) external view returns ((uint128 totalSupply, uint32 lastUpdated, uint24 lpFee, uint24 marginFee, uint24 protocolFee, uint128 realReserve0, uint128 realReserve1, uint128 mirrorReserve0, uint128 mirrorReserve1, uint128 pairReserve0, uint128 pairReserve1, uint128 truncatedReserve0, uint128 truncatedReserve1, uint128 lendReserve0, uint128 lendReserve1, uint128 interestReserve0, uint128 interestReserve1, int128 insuranceFund0, int128 insuranceFund1, uint256 borrow0CumulativeLast, uint256 borrow1CumulativeLast, uint256 deposit0CumulativeLast, uint256 deposit1CumulativeLast) stateInfo)",
 ]);
 
-// ======================= CLIENTS =======================
+// ======================= LEGACY CLIENTS (for genesis.js) =======================
 const publicClient = createPublicClient({
   chain: CHAIN,
   transport: http(RPC_URL),
 });
 
-// ======================= BUNDLER =======================
+// ======================= BUNDLER (legacy) =======================
 
 let bundlerRequestId = 0;
 
@@ -153,6 +244,36 @@ function serializeRpcValue(value) {
   return value;
 }
 
+function createBundlerRequestFn(bundlerUrl, chainId) {
+  let reqId = 0;
+  return async function bundlerRequest(method, params) {
+    const response = await fetch(bundlerUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: ++reqId,
+        chainId,
+        method,
+        params: serializeRpcValue(params),
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.error?.message || response.statusText);
+    }
+    if (payload.error) {
+      const error = new Error(payload.error.message || "Bundler request failed");
+      error.code = payload.error.code;
+      error.extraData = payload.error.extraData;
+      throw error;
+    }
+    return payload.result;
+  };
+}
+
+// Legacy bundler functions using the Sepolia bundler
 async function bundlerRequest(method, params) {
   const response = await fetch(BUNDLER_URL, {
     method: "POST",
@@ -258,15 +379,522 @@ function getWalletInstance() {
   return null;
 }
 
-async function getSmartAccount(signer) {
-  return await signerToSimpleSmartAccount(publicClient, {
+async function getSmartAccount(signer, client) {
+  return await signerToSimpleSmartAccount(client || publicClient, {
     entryPoint: ENTRY_POINT_ADDRESS,
     signer: signer,
     factoryAddress: SMART_ACCOUNT_FACTORY_ADDRESS,
   });
 }
 
-// ======================= USER OPERATION =======================
+// ======================= MULTI-CHAIN: getChainContext =======================
+
+/**
+ * Returns a full chain context object for the given chain name.
+ * chainName is REQUIRED — no default chain.
+ *
+ * The context contains: config, publicClient, contract addresses, token map,
+ * and lazy-created bundler/smart-account infrastructure.
+ */
+function getChainContext(chainName) {
+  if (!chainName) {
+    throw new Error("Chain name is required. Supported chains: " + Object.keys(CHAIN_REGISTRY).join(", "));
+  }
+  const key = chainName.toLowerCase();
+  const reg = CHAIN_REGISTRY[key];
+  if (!reg) {
+    throw new Error(`Unknown chain: "${chainName}". Supported chains: ${Object.keys(CHAIN_REGISTRY).join(", ")}`);
+  }
+
+  const pc = createPublicClient({
+    chain: reg.chain,
+    transport: http(reg.rpc),
+  });
+
+  const chainBundlerRequest = createBundlerRequestFn(reg.bundler, reg.chainId);
+
+  const chainBundlerTransport = custom({
+    request: ({ method, params }) => chainBundlerRequest(method, params),
+  });
+
+  const chainBundlerClient = createBundlerClient({
+    chain: reg.chain,
+    entryPoint: ENTRY_POINT_ADDRESS,
+    transport: chainBundlerTransport,
+  });
+
+  // Merge custom tokens from .likwid_tokens.json
+  const customTokens = loadCustomTokens(key);
+  const allTokens = { ...reg.tokens, ...customTokens };
+
+  return {
+    name: key,
+    chain: reg.chain,
+    chainId: reg.chainId,
+    rpc: reg.rpc,
+    bundlerUrl: reg.bundler,
+    contracts: reg.contracts,
+    agc: reg.agc,
+    tokens: allTokens,
+    nativeSymbol: reg.nativeSymbol,
+    publicClient: pc,
+    bundlerClient: chainBundlerClient,
+    bundlerTransport: chainBundlerTransport,
+    bundlerRequest: chainBundlerRequest,
+    hasAgc: !!reg.agc,
+    getSmartAccount: async (signer) => getSmartAccount(signer, pc),
+    getGasPrice: async () => {
+      const fees = await pc.estimateFeesPerGas();
+      return {
+        maxFeePerGas: fees.maxFeePerGas,
+        maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+      };
+    },
+    getDirectGasPrice: async () => {
+      const fees = await pc.estimateFeesPerGas();
+      const minGas = 1_000_000_000n;
+      return {
+        maxFeePerGas: fees.maxFeePerGas > minGas ? fees.maxFeePerGas : minGas,
+        maxPriorityFeePerGas: fees.maxPriorityFeePerGas > minGas ? fees.maxPriorityFeePerGas : minGas,
+      };
+    },
+  };
+}
+
+// ======================= MULTI-CHAIN: Token Resolution =======================
+
+/**
+ * Resolve a token symbol or address to a normalized address.
+ * Case-insensitive symbol lookup.
+ */
+function resolveToken(chainCtx, symbolOrAddress) {
+  if (!symbolOrAddress) throw new Error("Token symbol or address is required.");
+
+  // Direct address
+  if (symbolOrAddress.startsWith("0x") && symbolOrAddress.length === 42) {
+    return symbolOrAddress.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()
+      ? NATIVE_TOKEN_ADDRESS
+      : symbolOrAddress;
+  }
+
+  // Symbol lookup (case-insensitive)
+  const sym = symbolOrAddress.toUpperCase();
+  for (const [key, addr] of Object.entries(chainCtx.tokens)) {
+    if (key.toUpperCase() === sym) return addr;
+  }
+
+  throw new Error(
+    `Unknown token "${symbolOrAddress}" on ${chainCtx.name}. Known tokens: ${Object.keys(chainCtx.tokens).join(", ")}`,
+  );
+}
+
+/**
+ * Get the display symbol for a token address on the given chain context.
+ */
+function getTokenSymbol(chainCtx, address) {
+  const addr = address.toLowerCase();
+  for (const [sym, tokenAddr] of Object.entries(chainCtx.tokens)) {
+    if (tokenAddr.toLowerCase() === addr) return sym;
+  }
+  // Return abbreviated address if no symbol found
+  return address.slice(0, 6) + "..." + address.slice(-4);
+}
+
+// ======================= MULTI-CHAIN: Pool Resolution =======================
+
+/**
+ * Compute a poolId from a poolKey.
+ */
+function computePoolId(poolKey) {
+  return keccak256(
+    encodeAbiParameters(
+      [
+        { name: "currency0", type: "address" },
+        { name: "currency1", type: "address" },
+        { name: "fee", type: "uint24" },
+        { name: "marginFee", type: "uint24" },
+      ],
+      [poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.marginFee],
+    ),
+  );
+}
+
+/**
+ * Resolve a pair string like "ETH/USDC" or "0xAAA/0xBBB" into a pool object.
+ * Pair is REQUIRED — no default pair.
+ * Automatically sorts currency0 < currency1 (Uniswap V4 convention).
+ *
+ * Returns: { poolKey, poolId, token0Symbol, token1Symbol, currency0, currency1 }
+ */
+function resolvePool(chainCtx, pairStr) {
+  if (!pairStr) {
+    throw new Error("Pool pair is required (e.g., ETH/USDC).");
+  }
+
+  const parts = pairStr.split("/");
+  if (parts.length !== 2) {
+    throw new Error(`Invalid pair format: "${pairStr}". Expected format: TOKEN0/TOKEN1 (e.g., ETH/USDC)`);
+  }
+
+  const addrA = resolveToken(chainCtx, parts[0].trim());
+  const addrB = resolveToken(chainCtx, parts[1].trim());
+
+  if (addrA.toLowerCase() === addrB.toLowerCase()) {
+    throw new Error("Pool pair tokens must be different.");
+  }
+
+  // Sort: currency0 < currency1
+  let currency0, currency1, sym0, sym1;
+  if (addrA.toLowerCase() < addrB.toLowerCase()) {
+    currency0 = addrA;
+    currency1 = addrB;
+    sym0 = getTokenSymbol(chainCtx, addrA);
+    sym1 = getTokenSymbol(chainCtx, addrB);
+  } else {
+    currency0 = addrB;
+    currency1 = addrA;
+    sym0 = getTokenSymbol(chainCtx, addrB);
+    sym1 = getTokenSymbol(chainCtx, addrA);
+  }
+
+  const poolKey = {
+    currency0,
+    currency1,
+    fee: 3000,
+    marginFee: 3000,
+  };
+
+  const poolId = computePoolId(poolKey);
+
+  return {
+    poolKey,
+    poolId,
+    token0Symbol: sym0,
+    token1Symbol: sym1,
+    currency0,
+    currency1,
+  };
+}
+
+// ======================= MULTI-CHAIN: Custom Tokens =======================
+
+/**
+ * Load custom tokens for a specific chain from .likwid_tokens.json.
+ */
+function loadCustomTokens(chainName) {
+  try {
+    if (!fs.existsSync(CUSTOM_TOKENS_FILE)) return {};
+    const data = JSON.parse(fs.readFileSync(CUSTOM_TOKENS_FILE, "utf8"));
+    const chainData = data[chainName];
+    if (chainData && chainData.tokens) {
+      return chainData.tokens;
+    }
+    return {};
+  } catch (e) {
+    return {};
+  }
+}
+
+/**
+ * Save a custom token for a specific chain to .likwid_tokens.json.
+ */
+function saveCustomToken(chainName, symbol, address) {
+  let data = {};
+  try {
+    if (fs.existsSync(CUSTOM_TOKENS_FILE)) {
+      data = JSON.parse(fs.readFileSync(CUSTOM_TOKENS_FILE, "utf8"));
+    }
+  } catch (e) {
+    data = {};
+  }
+
+  if (!data[chainName]) {
+    data[chainName] = { tokens: {} };
+  }
+  if (!data[chainName].tokens) {
+    data[chainName].tokens = {};
+  }
+  data[chainName].tokens[symbol.toUpperCase()] = address;
+
+  const dir = path.dirname(CUSTOM_TOKENS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(CUSTOM_TOKENS_FILE, JSON.stringify(data, null, 2));
+}
+
+// ======================= MULTI-CHAIN: runUserOp =======================
+
+/**
+ * Run a UserOperation on a specific chain context.
+ * chainCtx: chain context from getChainContext()
+ * account: smart account
+ * calls: single call or array of calls
+ * description: human-readable description
+ *
+ * Paymaster strategy:
+ *   - Chains with AGC (sepolia, base future): AGC Paymaster -> ETH fallback
+ *   - Other chains: direct native gas only
+ */
+async function runUserOpMultiChain(chainCtx, account, calls, description) {
+  let gasPaymentMode = chainCtx.hasAgc ? "agc" : "native";
+  const hasAgcPaymaster = chainCtx.hasAgc;
+  const paymasterAddress = hasAgcPaymaster ? chainCtx.agc.paymaster : null;
+  const agcTokenAddress = hasAgcPaymaster ? chainCtx.agc.token : null;
+  let expectsFreeMine = false;
+  let canUseFreeMine = false;
+  let preferredGasMode = hasAgcPaymaster ? "agc" : "native";
+  let ethBalance;
+  let agcBalance = 0n;
+  let estimatedDirectEthCost = null;
+  let paymasterEstimateSucceeded = false;
+  let estimatedAgcPrecharge = null;
+
+  if (hasAgcPaymaster) {
+    expectsFreeMine = isFreeMineOperationForToken(calls, agcTokenAddress);
+    if (expectsFreeMine) {
+      try {
+        const hasFreeMined = await chainCtx.publicClient.readContract({
+          address: paymasterAddress,
+          abi: AGENT_PAYMASTER_ABI,
+          functionName: "hasFreeMined",
+          args: [account.address],
+        });
+        canUseFreeMine = !hasFreeMined;
+      } catch {
+        canUseFreeMine = false;
+      }
+    }
+  }
+
+  // Create paymaster-sponsored client (only for AGC chains)
+  let smartAccountClient;
+  if (hasAgcPaymaster) {
+    const getSponsoredEstimate = async (userOperation, fallbackGasPrices) => {
+      const opToEstimate = {
+        ...userOperation,
+        paymasterAndData: paymasterAddress,
+        maxFeePerGas: fallbackGasPrices.maxFeePerGas,
+        maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
+      };
+      const [estimate, rawEstimate] = await Promise.all([
+        chainCtx.bundlerClient.estimateUserOperationGas({ userOperation: opToEstimate }),
+        chainCtx.bundlerRequest("eth_estimateUserOperationGas", [opToEstimate, ENTRY_POINT_ADDRESS]),
+      ]);
+      return {
+        ...estimate,
+        maxFeePerGas: rawEstimate.maxFeePerGas ?? fallbackGasPrices.maxFeePerGas,
+        maxPriorityFeePerGas: rawEstimate.maxPriorityFeePerGas ?? fallbackGasPrices.maxPriorityFeePerGas,
+        paymasterAndData: paymasterAddress,
+      };
+    };
+
+    smartAccountClient = createSmartAccountClient({
+      account,
+      entryPoint: ENTRY_POINT_ADDRESS,
+      chain: chainCtx.chain,
+      bundlerTransport: chainCtx.bundlerTransport,
+      middleware: {
+        sponsorUserOperation: async ({ userOperation }) => {
+          console.log(`> Estimating gas and attaching custom paymaster (${description})...`);
+          const fallbackGasPrices = await chainCtx.getGasPrice();
+          try {
+            const estimate = await getSponsoredEstimate(userOperation, fallbackGasPrices);
+            gasPaymentMode = canUseFreeMine ? "free" : "agc";
+            return {
+              ...estimate,
+              verificationGasLimit:
+                BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
+            };
+          } catch (paymasterError) {
+            const paymasterErrorMessage = [
+              paymasterError?.message,
+              paymasterError?.cause?.message,
+              typeof paymasterError?.extraData === "string" ? paymasterError.extraData : null,
+            ]
+              .filter(Boolean)
+              .join(" | ");
+            console.log(`> Warning: Paymaster estimation/attachment failed: ${paymasterErrorMessage.slice(0, 160)}`);
+            throw paymasterError;
+          }
+        },
+      },
+    });
+  }
+
+  // Unwrap single-element arrays so encodeCallData uses execute() instead of executeBatch().
+  // executeBatch() on SimpleAccount v0.6 does NOT support msg.value per call.
+  const encodedCalls = Array.isArray(calls) && calls.length === 1 ? calls[0] : calls;
+
+  const ethSmartAccountClient = createSmartAccountClient({
+    account,
+    entryPoint: ENTRY_POINT_ADDRESS,
+    chain: chainCtx.chain,
+    bundlerTransport: chainCtx.bundlerTransport,
+    middleware: {
+      gasPrice: chainCtx.getDirectGasPrice,
+    },
+  });
+
+  console.log(`> Packaging UserOperation for ${description}...`);
+  try {
+    const callData = await account.encodeCallData(encodedCalls);
+    let userOpHash;
+    const operationRequiredEth = getOperationRequiredEth(calls);
+
+    // Estimate direct native gas cost
+    try {
+      const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
+        userOperation: { callData },
+      });
+      estimatedDirectEthCost = getRequiredPrefundForUserOperation(ethUserOperation);
+    } catch (ethEstimateError) {
+      console.log(
+        `> Warning: Direct native gas estimation failed: ${getNormalizedErrorMessage(ethEstimateError).slice(0, 160)}`,
+      );
+    }
+
+    ethBalance = await chainCtx.publicClient.getBalance({ address: account.address });
+
+    if (hasAgcPaymaster) {
+      agcBalance = await chainCtx.publicClient.readContract({
+        address: agcTokenAddress,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [account.address],
+      });
+
+      const operationRequiredAgc = await getOperationRequiredAgcForChain(
+        chainCtx, calls, agcTokenAddress,
+      );
+
+      const totalRequiredEthForDirect =
+        estimatedDirectEthCost === null ? null : estimatedDirectEthCost + operationRequiredEth;
+      const hasEnoughEthForDirectGas = totalRequiredEthForDirect !== null && ethBalance >= totalRequiredEthForDirect;
+      const hasEnoughAgcForOperation = agcBalance >= operationRequiredAgc;
+
+      if (!hasEnoughAgcForOperation && !hasEnoughEthForDirectGas) {
+        const shortfallAgc = operationRequiredAgc - agcBalance;
+        throw new Error(
+          [
+            "CLI_INSUFFICIENT_OPERATION_AGC",
+            `required=${formatTokenAmount(operationRequiredAgc)}`,
+            `available=${formatTokenAmount(agcBalance)}`,
+            `op_shortfall=${formatTokenAmount(shortfallAgc)}`,
+          ].join("|"),
+        );
+      }
+
+      if (hasEnoughEthForDirectGas) {
+        preferredGasMode = "eth";
+      } else if (canUseFreeMine) {
+        preferredGasMode = "agc";
+      } else {
+        const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrowMultiChain(
+          chainCtx, callData, ethSmartAccountClient, agcTokenAddress, paymasterAddress,
+        );
+        estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
+        const totalRequiredAgc = operationRequiredAgc + estimatedAgcPrecharge;
+        if (agcBalance < totalRequiredAgc) {
+          throw new Error(
+            [
+              "CLI_INSUFFICIENT_TOTAL_AGC",
+              `operation=${formatTokenAmount(operationRequiredAgc)}`,
+              `precharge=${formatTokenAmount(estimatedAgcPrecharge)}`,
+              `required=${formatTokenAmount(totalRequiredAgc)}`,
+              `available=${formatTokenAmount(agcBalance)}`,
+              `shortfall=${formatTokenAmount(totalRequiredAgc - agcBalance)}`,
+            ].join("|"),
+          );
+        }
+        preferredGasMode = "agc";
+        paymasterEstimateSucceeded = true;
+      }
+    } else {
+      // No AGC paymaster — native gas only
+      const totalRequiredEth =
+        estimatedDirectEthCost === null ? null : estimatedDirectEthCost + operationRequiredEth;
+      if (totalRequiredEth !== null && ethBalance < totalRequiredEth) {
+        throw new Error(
+          [
+            "CLI_INSUFFICIENT_NATIVE_GAS",
+            `required=${formatTokenAmount(totalRequiredEth)}`,
+            `available=${formatTokenAmount(ethBalance)}`,
+            `shortfall=${formatTokenAmount(totalRequiredEth - ethBalance)}`,
+          ].join("|"),
+        );
+      }
+      preferredGasMode = "native";
+    }
+
+    const submitWithNative = async () => {
+      gasPaymentMode = hasAgcPaymaster ? "eth" : "native";
+      const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
+        userOperation: { callData },
+      });
+      ethUserOperation.signature = await account.signUserOperation(ethUserOperation);
+      return chainCtx.bundlerRequest("eth_sendUserOperation", [ethUserOperation, ENTRY_POINT_ADDRESS]);
+    };
+
+    const submitWithPaymaster = async () =>
+      smartAccountClient.sendUserOperation({
+        userOperation: { callData },
+      });
+
+    if (preferredGasMode === "native" || preferredGasMode === "eth") {
+      console.log(`> Smart account ${chainCtx.nativeSymbol} balance: ${Number(ethBalance) / 1e18} ${chainCtx.nativeSymbol}`);
+      if (estimatedDirectEthCost !== null) {
+        console.log(`> Estimated direct ${chainCtx.nativeSymbol} gas required: ${Number(estimatedDirectEthCost) / 1e18} ${chainCtx.nativeSymbol}`);
+      }
+      if (operationRequiredEth > 0n) {
+        console.log(`> ${chainCtx.nativeSymbol} required by operation: ${Number(operationRequiredEth) / 1e18} ${chainCtx.nativeSymbol}`);
+      }
+      console.log(`> Using direct ${chainCtx.nativeSymbol} gas payment...`);
+      userOpHash = await submitWithNative();
+    } else {
+      console.log(`> Smart account ${chainCtx.nativeSymbol} balance: ${Number(ethBalance) / 1e18} ${chainCtx.nativeSymbol}`);
+      console.log(`> Smart account AGC balance: ${Number(agcBalance) / 1e18} AGC`);
+      if (!canUseFreeMine) {
+        if (!paymasterEstimateSucceeded) {
+          console.log("> Checking paymaster estimate...");
+          const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrowMultiChain(
+            chainCtx, callData, ethSmartAccountClient, agcTokenAddress, paymasterAddress,
+          );
+          estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
+          paymasterEstimateSucceeded = true;
+        }
+        console.log(`> Estimated AGC precharge: ${Number(estimatedAgcPrecharge) / 1e18} AGC`);
+      }
+      console.log("> Using AGC / paymaster gas payment...");
+      userOpHash = await submitWithPaymaster();
+    }
+
+    console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
+    console.log("> Waiting for receipt...");
+    const receipt = await chainCtx.bundlerClient.waitForUserOperationReceipt({ hash: userOpHash, timeout: 120_000 });
+    if (receipt.success !== true || receipt.receipt?.status !== "success") {
+      throw new Error(
+        [
+          "CLI_USEROP_REVERTED",
+          `reason=${sanitizeCliField(receipt.reason || "unknown")}`,
+          `tx_hash=${receipt.receipt?.transactionHash || "unknown"}`,
+          `gas_used=${receipt.actualGasUsed ? receipt.actualGasUsed.toString() : "unknown"}`,
+          `gas_cost_eth=${receipt.actualGasCost ? formatTokenAmount(receipt.actualGasCost) : "unknown"}`,
+        ].join("|"),
+      );
+    }
+    const gasNote =
+      gasPaymentMode === "free"
+        ? " (first mine sponsored by paymaster)"
+        : gasPaymentMode === "agc"
+          ? " (gas paid in AGC)"
+          : ` (gas paid in ${chainCtx.nativeSymbol})`;
+    console.log(`\n> Done: ${description} Successful!${gasNote} Tx Hash: ${receipt.receipt.transactionHash}`);
+    return receipt;
+  } catch (e) {
+    return handleUserOpError(e, description);
+  }
+}
+
+// ======================= LEGACY USER OPERATION (for genesis.js) =======================
 
 async function runUserOp(account, calls, description) {
   let gasPaymentMode = "agc";
@@ -289,7 +917,6 @@ async function runUserOp(account, calls, description) {
       });
       canUseFreeMine = !hasFreeMined;
     } catch {
-      // If this read fails, stay conservative and avoid labeling the op as free.
       canUseFreeMine = false;
     }
   }
@@ -304,7 +931,6 @@ async function runUserOp(account, calls, description) {
         console.log(`> Estimating gas and attaching custom paymaster (${description})...`);
         const fallbackGasPrices = await getBundlerGasPrice();
 
-        // Try with AGC paymaster first (handles both AGC gas payment and free mine)
         try {
           const estimate = await getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices);
           gasPaymentMode = canUseFreeMine ? "free" : "agc";
@@ -322,16 +948,13 @@ async function runUserOp(account, calls, description) {
           ]
             .filter(Boolean)
             .join(" | ");
-          console.log(`> ⚠️  Paymaster estimation/attachment failed: ${paymasterErrorMessage.slice(0, 160)}`);
+          console.log(`> Warning: Paymaster estimation/attachment failed: ${paymasterErrorMessage.slice(0, 160)}`);
           throw paymasterError;
         }
       },
     },
   });
 
-  // Unwrap single-element arrays so encodeCallData uses execute() instead of executeBatch().
-  // executeBatch() on SimpleAccount v0.6 does NOT support msg.value per call,
-  // so any call with a non-zero value (e.g. Short AGC sending ETH) must go through execute().
   const encodedCalls = Array.isArray(calls) && calls.length === 1 ? calls[0] : calls;
 
   const ethSmartAccountClient = createSmartAccountClient({
@@ -358,7 +981,7 @@ async function runUserOp(account, calls, description) {
       estimatedDirectEthCost = getRequiredPrefundForUserOperation(ethUserOperation);
     } catch (ethEstimateError) {
       console.log(
-        `> ⚠️  Direct ETH gas estimation failed: ${getNormalizedErrorMessage(ethEstimateError).slice(0, 160)}`,
+        `> Warning: Direct ETH gas estimation failed: ${getNormalizedErrorMessage(ethEstimateError).slice(0, 160)}`,
       );
     }
 
@@ -474,69 +1097,304 @@ async function runUserOp(account, calls, description) {
         : gasPaymentMode === "eth"
           ? " (gas paid in ETH)"
           : " (gas paid in AGC)";
-    console.log(`\n> ✅ ${description} Successful!${gasNote} Tx Hash: ${receipt.receipt.transactionHash}`);
+    console.log(`\n> Done: ${description} Successful!${gasNote} Tx Hash: ${receipt.receipt.transactionHash}`);
     return receipt;
   } catch (e) {
-    const errMsg = e.message || String(e);
-    if (errMsg.startsWith("CLI_INSUFFICIENT_OPERATION_AGC|")) {
-      const fields = parseCliErrorFields(errMsg);
-      console.log(`> ❌ ${description} aborted.`);
-      console.log(`> AGC for operation is insufficient.`);
-      console.log(`> Required:  ${fields.required} AGC`);
-      console.log(`> Available: ${fields.available} AGC`);
-      console.log(`> Operation shortfall: ${fields.op_shortfall} AGC`);
-      return null;
-    }
-    if (errMsg.startsWith("CLI_PAYMASTER_ESTIMATE_FAILED|")) {
-      const fields = parseCliErrorFields(errMsg);
-      console.log(`> ❌ ${description} aborted.`);
-      console.log(`> Paymaster estimate failed.`);
-      console.log(`> This transaction cannot proceed with AGC gas sponsorship right now.`);
-      console.log(`> Detail: ${fields.reason}`);
-      return null;
-    }
-    if (errMsg.startsWith("CLI_INSUFFICIENT_TOTAL_AGC|")) {
-      const fields = parseCliErrorFields(errMsg);
-      console.log(`> ❌ ${description} aborted.`);
-      console.log(`> AGC is insufficient for operation + paymaster precharge.`);
-      console.log(`> Operation: ${fields.operation} AGC`);
-      console.log(`> Precharge: ${fields.precharge} AGC`);
-      console.log(`> Required:  ${fields.required} AGC`);
-      console.log(`> Available: ${fields.available} AGC`);
-      console.log(`> Shortfall: ${fields.shortfall} AGC`);
-      return null;
-    }
-    if (errMsg.startsWith("CLI_USEROP_REVERTED|")) {
-      const fields = parseCliErrorFields(errMsg);
-      console.log(`> ❌ ${description} reverted onchain.`);
-      console.log(`> Tx Hash: ${fields.tx_hash}`);
-      console.log(`> Reason: ${fields.reason}`);
-      console.log(`> Gas Used: ${fields.gas_used}`);
-      console.log(`> Gas Cost: ${fields.gas_cost_eth} ETH`);
-      return null;
-    }
-    // Detect gas estimation / contract revert errors and provide user-friendly output
-    if (errMsg.includes("EstimateGas") || errMsg.includes("execution reverted") || errMsg.includes("AA")) {
-      console.log(`> ❌ ${description} failed during gas estimation or execution.`);
-      console.log(`>`);
-      console.log(`> Possible causes:`);
-      console.log(`>   1. Collateral amount too small (try a larger amount)`);
-      console.log(`>   2. Insufficient token balance or allowance`);
-      console.log(`>   3. Insufficient AGC for paymaster AND insufficient ETH for direct gas payment`);
-      console.log(`>   4. Contract rejected the operation (invalid params or pool state)`);
-      console.log(`>`);
-      console.log(`> Technical detail: ${errMsg.slice(0, 200)}`);
-    } else {
-      console.error(`> ${description} execution failed:`, e.stack || errMsg);
-    }
+    return handleUserOpError(e, description);
+  }
+}
+
+// ======================= SHARED ERROR HANDLER =======================
+
+function handleUserOpError(e, description) {
+  const errMsg = e.message || String(e);
+  if (errMsg.startsWith("CLI_INSUFFICIENT_OPERATION_AGC|")) {
+    const fields = parseCliErrorFields(errMsg);
+    console.log(`> Error: ${description} aborted.`);
+    console.log(`> AGC for operation is insufficient.`);
+    console.log(`> Required:  ${fields.required} AGC`);
+    console.log(`> Available: ${fields.available} AGC`);
+    console.log(`> Operation shortfall: ${fields.op_shortfall} AGC`);
     return null;
   }
+  if (errMsg.startsWith("CLI_PAYMASTER_ESTIMATE_FAILED|")) {
+    const fields = parseCliErrorFields(errMsg);
+    console.log(`> Error: ${description} aborted.`);
+    console.log(`> Paymaster estimate failed.`);
+    console.log(`> This transaction cannot proceed with AGC gas sponsorship right now.`);
+    console.log(`> Detail: ${fields.reason}`);
+    return null;
+  }
+  if (errMsg.startsWith("CLI_INSUFFICIENT_TOTAL_AGC|")) {
+    const fields = parseCliErrorFields(errMsg);
+    console.log(`> Error: ${description} aborted.`);
+    console.log(`> AGC is insufficient for operation + paymaster precharge.`);
+    console.log(`> Operation: ${fields.operation} AGC`);
+    console.log(`> Precharge: ${fields.precharge} AGC`);
+    console.log(`> Required:  ${fields.required} AGC`);
+    console.log(`> Available: ${fields.available} AGC`);
+    console.log(`> Shortfall: ${fields.shortfall} AGC`);
+    return null;
+  }
+  if (errMsg.startsWith("CLI_INSUFFICIENT_NATIVE_GAS|")) {
+    const fields = parseCliErrorFields(errMsg);
+    console.log(`> Error: ${description} aborted.`);
+    console.log(`> Insufficient native token for gas.`);
+    console.log(`> Required:  ${fields.required}`);
+    console.log(`> Available: ${fields.available}`);
+    console.log(`> Shortfall: ${fields.shortfall}`);
+    return null;
+  }
+  if (errMsg.startsWith("CLI_USEROP_REVERTED|")) {
+    const fields = parseCliErrorFields(errMsg);
+    console.log(`> Error: ${description} reverted onchain.`);
+    console.log(`> Tx Hash: ${fields.tx_hash}`);
+    console.log(`> Reason: ${fields.reason}`);
+    console.log(`> Gas Used: ${fields.gas_used}`);
+    console.log(`> Gas Cost: ${fields.gas_cost_eth}`);
+    return null;
+  }
+  if (errMsg.includes("EstimateGas") || errMsg.includes("execution reverted") || errMsg.includes("AA")) {
+    console.log(`> Error: ${description} failed during gas estimation or execution.`);
+    console.log(`>`);
+    console.log(`> Possible causes:`);
+    console.log(`>   1. Collateral amount too small (try a larger amount)`);
+    console.log(`>   2. Insufficient token balance or allowance`);
+    console.log(`>   3. Insufficient gas token balance`);
+    console.log(`>   4. Contract rejected the operation (invalid params or pool state)`);
+    console.log(`>`);
+    console.log(`> Technical detail: ${errMsg.slice(0, 200)}`);
+  } else {
+    console.error(`> ${description} execution failed:`, e.stack || errMsg);
+  }
+  return null;
+}
+
+// ======================= MULTI-CHAIN PAYMASTER HELPERS =======================
+
+async function getPaymasterEstimateWithPrechargeOrThrowMultiChain(
+  chainCtx, callData, ethSmartAccountClient, agcTokenAddress, paymasterAddress,
+) {
+  const gasPrices = await chainCtx.getGasPrice();
+  const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
+    userOperation: { callData },
+  });
+
+  const opToEstimate = {
+    ...ethUserOperation,
+    paymasterAndData: paymasterAddress,
+    maxFeePerGas: gasPrices.maxFeePerGas,
+    maxPriorityFeePerGas: gasPrices.maxPriorityFeePerGas,
+  };
+
+  let estimate;
+  try {
+    const [est, rawEst] = await Promise.all([
+      chainCtx.bundlerClient.estimateUserOperationGas({ userOperation: opToEstimate }),
+      chainCtx.bundlerRequest("eth_estimateUserOperationGas", [opToEstimate, ENTRY_POINT_ADDRESS]),
+    ]);
+    estimate = {
+      ...est,
+      maxFeePerGas: rawEst.maxFeePerGas ?? gasPrices.maxFeePerGas,
+      maxPriorityFeePerGas: rawEst.maxPriorityFeePerGas ?? gasPrices.maxPriorityFeePerGas,
+      paymasterAndData: paymasterAddress,
+    };
+  } catch (error) {
+    throw new Error(
+      `CLI_PAYMASTER_ESTIMATE_FAILED|reason=${sanitizeCliField(getNormalizedErrorMessage(error).slice(0, 200))}`,
+    );
+  }
+
+  const requiredEthPrefund = getRequiredPrefundForUserOperation(estimate, true);
+  const estimatedAgcPrecharge = await estimateAgcPrechargeFromRequiredEthMultiChain(
+    chainCtx, (requiredEthPrefund * 31n) / 10n, agcTokenAddress,
+  );
+  return { estimate, estimatedAgcPrecharge };
+}
+
+async function estimateAgcPrechargeFromRequiredEthMultiChain(chainCtx, requiredEthPrefund, agcTokenAddress) {
+  if (!requiredEthPrefund || requiredEthPrefund <= 0n) return 0n;
+
+  const helperAddr = chainCtx.contracts.LikwidHelper;
+  const pairAddr = chainCtx.contracts.LikwidPairPosition;
+
+  // We need a poolId for the AGC pool on this chain
+  // Find a pool that includes AGC and the native token
+  const nativeAddr = NATIVE_TOKEN_ADDRESS;
+  let currency0, currency1;
+  if (nativeAddr.toLowerCase() < agcTokenAddress.toLowerCase()) {
+    currency0 = nativeAddr;
+    currency1 = agcTokenAddress;
+  } else {
+    currency0 = agcTokenAddress;
+    currency1 = nativeAddr;
+  }
+  const agcPoolId = keccak256(
+    encodeAbiParameters(
+      [
+        { name: "currency0", type: "address" },
+        { name: "currency1", type: "address" },
+        { name: "fee", type: "uint24" },
+        { name: "marginFee", type: "uint24" },
+      ],
+      [currency0, currency1, 3000, 3000],
+    ),
+  );
+
+  // Reserve-based quote
+  let reserveQuote = 0n;
+  try {
+    const state = await chainCtx.publicClient.readContract({
+      address: helperAddr,
+      abi: LIKWID_HELPER_ABI,
+      functionName: "getPoolStateInfo",
+      args: [agcPoolId],
+    });
+    const reserveEth = BigInt(state.pairReserve0);
+    const reserveAgc = BigInt(state.pairReserve1);
+    if (reserveEth > 0n && reserveAgc > 0n) {
+      reserveQuote = (requiredEthPrefund * reserveAgc * 120n) / (reserveEth * 100n);
+    }
+  } catch {}
+
+  // Spot quote
+  let spotQuote = 0n;
+  try {
+    const oneEth = 10n ** 18n;
+    const res = await chainCtx.publicClient.readContract({
+      address: helperAddr,
+      abi: LIKWID_HELPER_ABI,
+      functionName: "getAmountOut",
+      args: [agcPoolId, true, oneEth, true],
+    });
+    const agcPerEth = BigInt(res[0]);
+    if (agcPerEth > 0n) {
+      spotQuote = (requiredEthPrefund * agcPerEth * 120n) / (oneEth * 100n);
+    }
+  } catch {}
+
+  // Helper getAmountIn quote
+  let helperQuote = 0n;
+  try {
+    const res = await chainCtx.publicClient.readContract({
+      address: helperAddr,
+      abi: LIKWID_HELPER_ABI,
+      functionName: "getAmountIn",
+      args: [agcPoolId, false, requiredEthPrefund, true],
+    });
+    helperQuote = (BigInt(res[0]) * 110n) / 100n;
+  } catch {}
+
+  return maxBigInt(helperQuote, reserveQuote, spotQuote);
+}
+
+/**
+ * Compute how much AGC is needed for operations on any chain.
+ */
+async function getOperationRequiredAgcForChain(chainCtx, calls, agcTokenAddress) {
+  if (!agcTokenAddress) return 0n;
+
+  const callList = Array.isArray(calls) ? calls : [calls];
+  let requiredAgc = 0n;
+  const pairPos = chainCtx.contracts.LikwidPairPosition;
+  const marginPos = chainCtx.contracts.LikwidMarginPosition;
+  const lendPos = chainCtx.contracts.LikwidLendPosition;
+
+  for (const call of callList) {
+    if (!call || typeof call !== "object" || typeof call.to !== "string" || typeof call.data !== "string") continue;
+    const target = call.to.toLowerCase();
+
+    if (target === pairPos.toLowerCase()) {
+      let decoded;
+      try { decoded = decodeFunctionData({ abi: LIKWID_PAIR_ABI, data: call.data }); } catch { continue; }
+      if (decoded.functionName === "exactInput" && decoded.args?.[0]) {
+        const params = decoded.args[0];
+        const poolKey = await getPoolKeyFromContract(chainCtx, pairPos, params.poolId);
+        requiredAgc += getAgcAmountFromPairSwapInputGeneric(poolKey, params.zeroForOne, params.amountIn, agcTokenAddress);
+      } else if (decoded.functionName === "exactOutput" && decoded.args?.[0]) {
+        const params = decoded.args[0];
+        const poolKey = await getPoolKeyFromContract(chainCtx, pairPos, params.poolId);
+        requiredAgc += getAgcAmountFromPairSwapInputGeneric(poolKey, params.zeroForOne, params.amountInMax, agcTokenAddress);
+      } else if (decoded.functionName === "addLiquidity" && decoded.args?.[0]) {
+        requiredAgc += getAgcAmountFromPairLiquidityGeneric(decoded.args[0], decoded.args[2], decoded.args[3], agcTokenAddress);
+      }
+      continue;
+    }
+
+    if (target === marginPos.toLowerCase()) {
+      let decoded;
+      try { decoded = decodeFunctionData({ abi: LIKWID_MARGIN_ABI, data: call.data }); } catch { continue; }
+      if (decoded.functionName === "addMargin" && decoded.args?.[0] && decoded.args?.[1]) {
+        requiredAgc += getAgcAmountFromDirectionalAmountGeneric(
+          decoded.args[0], decoded.args[1].marginForOne, decoded.args[1].marginAmount, agcTokenAddress,
+        );
+      }
+      continue;
+    }
+
+    if (target === lendPos.toLowerCase()) {
+      let decoded;
+      try { decoded = decodeFunctionData({ abi: LIKWID_LEND_ABI, data: call.data }); } catch { continue; }
+      if (decoded.functionName === "addLending" && decoded.args?.[0]) {
+        requiredAgc += getAgcAmountFromDirectionalAmountGeneric(decoded.args[0], decoded.args[1], decoded.args[3], agcTokenAddress);
+      }
+    }
+  }
+
+  return requiredAgc;
+}
+
+function isFreeMineOperationForToken(calls, agcTokenAddress) {
+  const selector = AGC_MINE_SELECTOR;
+  const isCall = (call) =>
+    call && call.to && typeof call.to === "string" &&
+    call.to.toLowerCase() === agcTokenAddress.toLowerCase() &&
+    typeof call.data === "string" && call.data.startsWith(selector);
+  if (!Array.isArray(calls)) return isCall(calls);
+  return calls.length > 0 && calls.every(isCall);
+}
+
+async function getPoolKeyFromContract(chainCtx, contractAddr, poolId) {
+  try {
+    return await chainCtx.publicClient.readContract({
+      address: contractAddr,
+      abi: LIKWID_PAIR_ABI,
+      functionName: "poolKeys",
+      args: [poolId],
+    });
+  } catch (error) {
+    throw new Error(`Failed to read poolKeys(${poolId}) from ${contractAddr}: ${getNormalizedErrorMessage(error)}`);
+  }
+}
+
+function getAgcAmountFromPairSwapInputGeneric(poolKey, zeroForOne, amountIn, agcTokenAddress) {
+  return getAgcAmountFromDirectionalAmountGeneric(poolKey, !zeroForOne, amountIn, agcTokenAddress);
+}
+
+function getAgcAmountFromDirectionalAmountGeneric(poolKey, useCurrency1, amount, agcTokenAddress) {
+  const currency = useCurrency1
+    ? typeof poolKey?.currency1 === "string" ? poolKey.currency1 : poolKey?.[1]
+    : typeof poolKey?.currency0 === "string" ? poolKey.currency0 : poolKey?.[0];
+  return typeof currency === "string" && currency.toLowerCase() === agcTokenAddress.toLowerCase()
+    ? BigInt(amount ?? 0n)
+    : 0n;
+}
+
+function getAgcAmountFromPairLiquidityGeneric(poolKey, amount0, amount1, agcTokenAddress) {
+  const agcAddr = agcTokenAddress.toLowerCase();
+  const c0 = typeof poolKey?.currency0 === "string" ? poolKey.currency0.toLowerCase() : typeof poolKey?.[0] === "string" ? poolKey[0].toLowerCase() : null;
+  const c1 = typeof poolKey?.currency1 === "string" ? poolKey.currency1.toLowerCase() : typeof poolKey?.[1] === "string" ? poolKey[1].toLowerCase() : null;
+  let req = 0n;
+  if (c0 === agcAddr) req += BigInt(amount0 ?? 0n);
+  if (c1 === agcAddr) req += BigInt(amount1 ?? 0n);
+  return req;
 }
 
 // ======================= HELPERS =======================
 
-async function getApprovalCall(accountAddress, tokenAddress, spenderAddress, requiredAmount) {
-  const allowance = await publicClient.readContract({
+async function getApprovalCall(accountAddress, tokenAddress, spenderAddress, requiredAmount, client) {
+  const pc = client || publicClient;
+  const allowance = await pc.readContract({
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "allowance",
@@ -982,6 +1840,16 @@ module.exports = {
   LIKWID_LEND_POSITION,
   POOL_KEY,
   POOL_ID,
+  // Multi-chain
+  CHAIN_REGISTRY,
+  getChainContext,
+  resolveToken,
+  resolvePool,
+  getTokenSymbol,
+  computePoolId,
+  loadCustomTokens,
+  saveCustomToken,
+  runUserOpMultiChain,
   // ABIs
   ERC20_ABI,
   LIKWID_PAIR_ABI,
@@ -994,7 +1862,7 @@ module.exports = {
   // Wallet & Account
   getWalletInstance,
   getSmartAccount,
-  // UserOp
+  // UserOp (legacy for genesis.js)
   runUserOp,
   // Helpers
   getApprovalCall,
@@ -1005,6 +1873,8 @@ module.exports = {
   parseEther,
   encodeFunctionData,
   parseAbi,
+  keccak256,
+  encodeAbiParameters,
   generatePrivateKey,
   privateKeyToAccount,
   fs,

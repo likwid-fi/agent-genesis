@@ -1,24 +1,25 @@
 ---
 name: agent genesis
-version: 2.1.0
-description: Agent Genesis allows Agents to mine Agent Genesis Coin (AGC) and use it as native working capital. Earn AGC through Proof of Agent (POA) and use it to interact with the Likwid protocol.
+version: 2.2.0
+description: Agent Genesis allows Agents to mine Agent Genesis Coin (AGC) and gain full DeFi capabilities via the Likwid Protocol. Mine AGC through Proof of Agent (POA), then swap, provide liquidity, margin trade, and lend on any token pair across multiple EVM chains.
 homepage: https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/main/agc_whitepaper_en.md
 ---
 
 # Agent Genesis
 
-Your mission is to mine your initial **Agent Genesis Coin (AGC)** and interact with the Likwid protocol.
-Initial mining is fully sponsored (gasless) via the Agent Paymaster. Once you hold AGC, you will use it as the underlying asset for protocol operations.
+Your mission is to mine your initial **Agent Genesis Coin (AGC)** — and in doing so, unlock the **Likwid Protocol**, a universal DeFi engine that works across every supported EVM chain.
+
+AGC mining is your entry point. The Likwid Protocol is your DeFi toolkit — swap, LP, margin, lend, liquidate — on **any token pair, any supported chain**.
 
 ## Skill Architecture
 
 | File | Purpose |
 |------|---------|
-| **SKILL.md** (this file) | Core skill — wallet management & mining workflow |
-| **LIKWID.md** | Sub-skill — Likwid Protocol DeFi operations (swap, LP, margin, lend, liquidation) |
-| genesis.js | Wallet & mining CLI |
-| likwid.js | DeFi operations CLI |
-| shared.js | Shared infrastructure (wallet, clients, UserOp, ABIs) |
+| **SKILL.md** (this file) | Core skill — wallet management & AGC mining workflow |
+| **LIKWID.md** | **Likwid Protocol — Universal DeFi Engine** (swap, LP, margin, lend, liquidation on any chain/pair) |
+| genesis.js | AGC wallet & mining CLI (Sepolia / Base) |
+| likwid.js | Universal DeFi CLI (all chains, all pairs, wallet management) |
+| shared.js | Shared infrastructure (chain registry, wallet, ERC-4337, ABIs) |
 | package.json | Dependencies |
 | bootstrap.sh | Quick install script |
 
@@ -94,12 +95,14 @@ After the wallet report, immediately present what this skill enables:
 > Protect your locked vesting tokens against price drops using Likwid Agent Hedge — swap liquid AGC into ETH and open a short position to offset exposure.
 >
 > **💰 DeFi Operations (after you hold AGC)**
-> Once you have AGC, you can interact with the Likwid Protocol (see LIKWID.md):
-> • **Swap** — Trade between ETH ↔ AGC
-> • **Add Liquidity** — Provide ETH/AGC liquidity and earn fees
-> • **Margin Trading** — Open leveraged long/short positions on AGC
-> • **Lending** — Lend your ETH or AGC to earn interest
+> Once you have AGC, you gain full DeFi capabilities via the Likwid Protocol across multiple chains (see LIKWID.md):
+> • **Swap** — Trade any token pair on any supported chain
+> • **Add Liquidity** — Provide liquidity to any pool and earn fees
+> • **Margin Trading** — Open leveraged long/short positions on any pair
+> • **Lending** — Lend tokens to earn interest
 > • **Liquidation** — Scan and liquidate undercollateralized positions for profit
+> • **Supported Chains:** Sepolia, Ethereum, Base, BNB Chain
+> All DeFi commands require `--chain <chain>` and `--pair <TOKEN0/TOKEN1>`.
 >
 > 👉 **Ready to start mining? Just say the word!**
 
@@ -368,13 +371,25 @@ If the human says "auto-mine" or "run mining loop automatically":
 
 ## 3. DeFi Operations → LIKWID.md
 
-Once you hold AGC, you can interact with the Likwid Protocol. **All DeFi operations are documented in LIKWID.md** and executed via `likwid.js`.
+By learning this skill, you now have access to the **Likwid Protocol Universal DeFi Engine** — a complete DeFi toolkit that works on **any token pair across any supported EVM chain** (Sepolia, Ethereum, Base, BNB Chain).
+
+**All DeFi operations are documented in LIKWID.md** and executed via `likwid.js`.
 
 ```bash
-cd ~/.openclaw/skills/agent-genesis && node likwid.js <command>
+cd ~/.openclaw/skills/agent-genesis && node likwid.js <command> --chain <chain> --pair <pair>
 ```
 
-See LIKWID.md for full details on: swap, add liquidity, margin trading, lending, liquidation, and position management.
+**`--chain` and `--pair` are REQUIRED.** Supported chains: sepolia, ethereum, base, bnb.
+
+**What you can do on any chain, any pair:**
+- **Swap** — Trade any token pair (`node likwid.js swap eth-usdc 0.1 --chain ethereum --pair ETH/USDC`)
+- **Add Liquidity** — Provide liquidity and earn fees + interest
+- **Margin Trading** — Open leveraged long/short positions (up to 5x)
+- **Lending** — Single-sided lending, earn interest, no impermanent loss
+- **Liquidation** — Scan and liquidate undercollateralized positions for profit
+- **Custom Tokens** — Register any ERC-20 token and trade it
+
+See LIKWID.md for full details on all operations, wallet setup, chain deployments, and protocol mechanics.
 
 ---
 
@@ -419,14 +434,20 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `hedge_status` | Analyze hedging opportunity (vesting exposure, coverage simulation). |
 | `hedge <agc> [lev] [slip]` | Execute hedge: swap AGC→ETH, then open Short AGC position. |
 
-### likwid.js — DeFi Operations (see LIKWID.md)
+### likwid.js — Universal DeFi Engine (see LIKWID.md)
+
+All DeFi commands require `--chain <chain>`. Swap/LP/margin/lend also require `--pair <TOKEN0/TOKEN1>`.
 
 | Command | Description |
 | :--- | :--- |
-| `swap <dir> <amt> [slip]` | Swap between ETH and AGC. |
-| `lp_add <eth> [slip]` | Add liquidity to ETH/AGC pool. |
-| `margin_open <dir> <amt> [lev]` | Open a margin position. |
-| `lend_open <asset> <amt>` | Lend ETH or AGC. |
+| `check_wallet` | Check if wallet exists and show addresses. |
+| `create_wallet` | Create a new EOA wallet (ERC-4337). |
+| `get_smart_account` | Display EOA and Smart Account addresses. |
+| `balance` | Show balances on a chain. |
+| `swap <dir> <amt> [slip]` | Swap any token pair. dir: 0-1, 1-0, or symbol-based. |
+| `lp_add <amt0> [slip]` | Add liquidity to any pool. |
+| `margin_open <dir> <amt> [lev]` | Open a margin position on any pair. |
+| `lend_open <side> <amt>` | Lend any token. side: 0/1/symbol. |
 | `liquidate <id>` | Liquidate a margin position. |
 | `scan [window]` | Scan for liquidation opportunities. |
 | `positions` | Scan and display all your DeFi positions. |
@@ -436,3 +457,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `lp_remove <id>` | Remove all liquidity from LP position. |
 | `lend_info <id>` | View lend position details. |
 | `lend_close <id> [amount]` | Withdraw from lend position (default: full). |
+| `pools` | List known tokens on a chain. |
+| `add_token <sym> <addr>` | Register a custom ERC-20 token. |
+| `pool_info` | Pool state (reserves, fees, utilization). |
+| `price` | Current price for a pool. |
