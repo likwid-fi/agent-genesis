@@ -149,7 +149,7 @@ function serializeRpcValue(value) {
 
 let bundlerRequestId = 0;
 
-function createParticleBundlerTransport(bundlerUrl, chainId) {
+function createBundlerTransport(bundlerUrl, chainId) {
   return custom({
     request: async ({ method, params }) => {
       const response = await fetch(bundlerUrl, {
@@ -212,9 +212,7 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
     entryPoint: { address: entryPoint06Address, version: "0.6" },
   });
 
-  const bundlerTransport = bundlerUrl.includes("bundler.particle.network")
-    ? createParticleBundlerTransport(bundlerUrl, chain.id)
-    : http(bundlerUrl);
+  const bundlerTransport = createBundlerTransport(bundlerUrl, chain.id);
 
   const bundlerClient = createBundlerClient({
     account: smartAccount,
