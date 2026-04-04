@@ -13,14 +13,14 @@
   },
   "tokens": {
     "ETH": { "address": "0x0000000000000000000000000000000000000000", "decimals": 18 },
-    "USDT": { "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89", "decimals": 18 },
+    "USDT": { "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89", "decimals": 6 },
     "LIKWID": { "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13", "decimals": 18 }
   },
   "pools": [
     {
       "name": "ETH / USDT",
       "currency0": { "address": "0x0000000000000000000000000000000000000000", "symbol": "ETH", "decimals": 18 },
-      "currency1": { "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89", "symbol": "USDT", "decimals": 18 },
+      "currency1": { "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89", "symbol": "USDT", "decimals": 6 },
       "fee": 3000,
       "marginFee": 3000
     },
