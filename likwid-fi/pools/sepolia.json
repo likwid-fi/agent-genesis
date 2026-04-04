@@ -1,0 +1,46 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+  "bundlerUrl": "https://bundler.particle.network",
+  "smartAccountFactory": "0x9406Cc6185a346906296840746125a0E44976454",
+  "contracts": {
+    "LikwidVault": "0x315663A47d7E95c47370682DfF77415F469C3246",
+    "LikwidPairPosition": "0xA8296e28c62249f89188De0499a81d6AD993a515",
+    "LikwidMarginPosition": "0x6a2666cA9D5769069762225161D454894fCe617c",
+    "LikwidLendPosition": "0xd04C34F7F57cAC394eC170C4Fe18A8B0330A2F37",
+    "LikwidHelper": "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013"
+  },
+  "pools": [
+    {
+      "name": "ETH / USDT",
+      "currency0": {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "currency1": {
+        "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89",
+        "symbol": "USDT",
+        "decimals": 18
+      },
+      "fee": 3000,
+      "marginFee": 3000
+    },
+    {
+      "name": "ETH / LIKWID",
+      "currency0": {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18
+      },
+      "currency1": {
+        "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
+        "symbol": "LIKWID",
+        "decimals": 18
+      },
+      "fee": 3000,
+      "marginFee": 3000
+    }
+  ]
+}

@@ -20,5 +20,11 @@
 !contracts/test/AgentGenesisCoin.t.sol
 !contracts/test/AgentPaymaster.t.sol
 !audit/AGC_SECURITY_AUDIT_v3.md
+# Likwid.fi universal skill
+!likwid-fi/SKILL.md
+!likwid-fi/likwid-fi.js
+!likwid-fi/package.json
+!likwid-fi/abi/*.json
+!likwid-fi/pools/*.json
 # Ignore unnecessary special cases
 !*/
