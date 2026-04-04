@@ -16,7 +16,9 @@
 const {
   createPublicClient,
   createWalletClient,
+  custom,
   http,
+  toHex,
   parseUnits,
   formatUnits,
   encodeFunctionData,
@@ -131,8 +133,48 @@ function isNative(address) {
 function resolveRpc(config, networkConfig) {
   if (process.env.RPC_URL) return http(process.env.RPC_URL);
   if (networkConfig.rpc) return http(networkConfig.rpc);
-  // Fallback to viem's built-in chain RPC
   return http();
+}
+
+// ======================= BUNDLER HELPERS =======================
+
+function serializeRpcValue(value) {
+  if (typeof value === "bigint") return toHex(value);
+  if (Array.isArray(value)) return value.map(serializeRpcValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, serializeRpcValue(nested)]));
+  }
+  return value;
+}
+
+let bundlerRequestId = 0;
+
+function createParticleBundlerTransport(bundlerUrl, chainId) {
+  return custom({
+    request: async ({ method, params }) => {
+      const response = await fetch(bundlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: ++bundlerRequestId,
+          chainId,
+          method,
+          params: serializeRpcValue(params),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error?.message || response.statusText);
+      }
+      if (payload.error) {
+        const error = new Error(payload.error.message || "Bundler request failed");
+        error.code = payload.error.code;
+        throw error;
+      }
+      return payload.result;
+    },
+  });
 }
 
 // ======================= CLIENT SETUP =======================
@@ -152,8 +194,9 @@ function createClients(config, networkConfig) {
 }
 
 async function getSmartAccount(config, networkConfig, eoaAccount) {
-  const { createSmartAccountClient, createBundlerClient, ENTRYPOINT_ADDRESS_V06 } = require("permissionless");
-  const { signerToSimpleSmartAccount } = require("permissionless/accounts");
+  const { toSimpleSmartAccount } = require("permissionless/accounts");
+  const { entryPoint06Address } = require("viem/account-abstraction");
+  const { createBundlerClient } = require("viem/account-abstraction");
 
   const chain = CHAINS[config.network];
   const transport = resolveRpc(config, networkConfig);
@@ -162,26 +205,34 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
 
   const publicClient = createPublicClient({ chain, transport });
 
-  const smartAccount = await signerToSimpleSmartAccount(publicClient, {
-    signer: eoaAccount,
+  const smartAccount = await toSimpleSmartAccount({
+    client: publicClient,
+    owner: eoaAccount,
     factoryAddress,
-    entryPoint: ENTRYPOINT_ADDRESS_V06,
+    entryPoint: { address: entryPoint06Address, version: "0.6" },
   });
+
+  const bundlerTransport = bundlerUrl.includes("bundler.particle.network")
+    ? createParticleBundlerTransport(bundlerUrl, chain.id)
+    : http(bundlerUrl);
 
   const bundlerClient = createBundlerClient({
-    transport: http(bundlerUrl),
-    entryPoint: ENTRYPOINT_ADDRESS_V06,
-    chain,
-  });
-
-  const smartAccountClient = createSmartAccountClient({
     account: smartAccount,
-    entryPoint: ENTRYPOINT_ADDRESS_V06,
-    chain,
-    bundlerTransport: http(bundlerUrl),
+    client: publicClient,
+    transport: bundlerTransport,
+    userOperation: {
+      estimateFeesPerGas: async () => {
+        const fees = await publicClient.estimateFeesPerGas();
+        const floor = 1_000_000_000n; // 1 gwei floor for Particle bundler
+        return {
+          maxFeePerGas: fees.maxFeePerGas > floor ? fees.maxFeePerGas : floor,
+          maxPriorityFeePerGas: fees.maxPriorityFeePerGas > floor ? fees.maxPriorityFeePerGas : floor,
+        };
+      },
+    },
   });
 
-  return { smartAccount, smartAccountClient, bundlerClient, publicClient };
+  return { smartAccount, bundlerClient, publicClient };
 }
 
 // ======================= SHARED EXECUTION =======================
@@ -199,23 +250,52 @@ async function buildApprovalCall(publicClient, owner, tokenAddress, tokenSymbol,
   };
 }
 
+async function submitUserOp(bundlerClient, calls) {
+  const hash = await bundlerClient.sendUserOperation({ calls });
+  console.log(`> UserOp submitted: ${hash}`);
+  console.log(`> Waiting for receipt...`);
+  const receipt = await bundlerClient.waitForUserOperationReceipt({ hash, timeout: 120_000 });
+  if (receipt.success && receipt.receipt?.status === "success") {
+    console.log(`> TX_OK`);
+    console.log(`> Transaction: ${receipt.receipt.transactionHash}`);
+    console.log(`> Block: ${receipt.receipt.blockNumber}`);
+    console.log(`> Gas used: ${receipt.actualGasUsed}`);
+    return true;
+  } else {
+    console.log(`> TX_REVERTED`);
+    console.log(`> Transaction: ${receipt.receipt?.transactionHash || "unknown"}`);
+    console.log(`> Reason: ${receipt.reason || "unknown"}`);
+    return false;
+  }
+}
+
 async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) {
   if (config.accountType === "smart") {
-    // --- Smart Account: batch all calls into a single UserOp ---
-    const { smartAccountClient } = await getSmartAccount(config, netConfig, eoaAccount);
-    console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
+    const { bundlerClient } = await getSmartAccount(config, netConfig, eoaAccount);
+
+    // Split calls: if batch contains ETH-value calls mixed with zero-value calls,
+    // run zero-value calls (approvals) first, then the value call separately.
+    // SimpleAccount v0.6 executeBatch() does NOT forward msg.value per call.
+    const hasValueCall = calls.some(c => c.value > 0n);
+    const needsSplit = calls.length > 1 && hasValueCall;
+
     try {
-      const txHash = await smartAccountClient.sendTransactions({ transactions: calls });
-      console.log(`> UserOp submitted: ${txHash}`);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-      if (receipt.status === "success") {
-        console.log(`> TX_OK`);
-        console.log(`> Transaction: ${txHash}`);
-        console.log(`> Block: ${receipt.blockNumber}`);
-        console.log(`> Gas used: ${receipt.gasUsed}`);
+      if (needsSplit) {
+        const zeroCalls = calls.filter(c => !c.value || c.value === 0n);
+        const valueCalls = calls.filter(c => c.value > 0n);
+        if (zeroCalls.length > 0) {
+          console.log(`> Submitting approvals (${zeroCalls.length} call${zeroCalls.length > 1 ? "s" : ""})...`);
+          const ok = await submitUserOp(bundlerClient, zeroCalls);
+          if (!ok) return;
+        }
+        for (const vc of valueCalls) {
+          console.log(`> Submitting value-carrying call...`);
+          const ok = await submitUserOp(bundlerClient, [vc]);
+          if (!ok) return;
+        }
       } else {
-        console.log(`> TX_REVERTED`);
-        console.log(`> Transaction: ${txHash}`);
+        console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
+        await submitUserOp(bundlerClient, calls);
       }
     } catch (e) {
       console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
@@ -244,7 +324,6 @@ async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) 
         return;
       }
     }
-    const lastCall = calls[calls.length - 1];
     console.log(`> TX_OK`);
   }
 }
@@ -542,8 +621,8 @@ async function cmd_pool_info(poolIndexStr) {
       return;
     }
 
-    const rate0to1 = Number(r1) / Number(r0);
-    const rate1to0 = Number(r0) / Number(r1);
+    const rate0to1 = Number(formatUnits(r1, pool.currency1.decimals)) / Number(formatUnits(r0, pool.currency0.decimals));
+    const rate1to0 = Number(formatUnits(r0, pool.currency0.decimals)) / Number(formatUnits(r1, pool.currency1.decimals));
 
     console.log(`> POOL_INFO`);
     console.log(`> Pool: [${poolIndex}] ${pool.name}`);
@@ -584,7 +663,6 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
   }
 
   const inputToken = inputSide === 0 ? pool.currency0 : pool.currency1;
-  const otherToken = inputSide === 0 ? pool.currency1 : pool.currency0;
   const inputAmount = parseUnits(amountStr, inputToken.decimals);
   const slippage = BigInt(slippageStr);
   const poolId = computePoolId(pool);
@@ -647,7 +725,7 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
   const amount1Min = (amount1 * (100n - slippage)) / 100n;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
 
-  const rate = Number(r1) / Number(r0);
+  const rate = Number(formatUnits(r1, pool.currency1.decimals)) / Number(formatUnits(r0, pool.currency0.decimals));
 
   console.log(`> LP_ADD: [${poolIndex}] ${pool.name}`);
   console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
