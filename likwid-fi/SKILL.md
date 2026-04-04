@@ -160,7 +160,68 @@ Or on failure:
 
 ---
 
-## 2. Error Handling
+## 2. Add Liquidity
+
+Provide liquidity to a Likwid pool and receive an LP position (ERC-721 NFT).
+
+### Step 1: Select Pool & Check State
+
+```bash
+node likwid-fi.js pool_info <poolIndex>
+```
+
+**If pool is not initialized:**
+
+> **Pool Not Initialized**
+> Pool `[<INDEX>]` `<NAME>` has no liquidity. You need to Create a Pair first.
+
+**If pool exists, report to human:**
+
+> **Pool `[<INDEX>]` `<NAME>`**
+> Reserve `<SYMBOL0>`: `<RESERVE0>`
+> Reserve `<SYMBOL1>`: `<RESERVE1>`
+> Rate: 1 `<SYMBOL0>` = `<RATE>` `<SYMBOL1>`
+>
+> How much liquidity would you like to add? You can provide an amount for either `<SYMBOL0>` or `<SYMBOL1>` — the other side will be auto-calculated from the pool ratio.
+
+### Step 2: Execute
+
+The user provides an amount for **one side** (currency `0` or `1`). The matching amount is auto-calculated.
+
+```bash
+node likwid-fi.js lp_add <poolIndex> <currency> <amount> [slippage%]
+```
+
+- `<currency>`: `0` for currency0, `1` for currency1
+- The other side is calculated proportionally from the on-chain reserve ratio
+
+**Report to human before execution:**
+
+> **Add Liquidity Preview:**
+> Pool: `[<INDEX>]` `<NAME>`
+> Rate: 1 `<SYMBOL0>` = `<RATE>` `<SYMBOL1>`
+> `<SYMBOL0>`: `<AMOUNT0>`
+> `<SYMBOL1>`: `<AMOUNT1>`
+> Slippage: `<SLIPPAGE>`%
+>
+> Proceed? (yes/no)
+
+**Wait for human confirmation before executing.**
+
+**After execution:**
+
+> **Liquidity Added!**
+> Transaction: `<TX_HASH>`
+> Block: `<BLOCK_NUMBER>`
+
+Or on failure:
+
+> **Add Liquidity Failed:** `<ERROR_MESSAGE>`
+> No funds were spent.
+
+---
+
+## 3. Error Handling
 
 When errors occur, **always inform the human clearly**. Never silently swallow errors.
 
@@ -186,8 +247,10 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `setup <net> <key> [type]` | Configure network, wallet, and account type. |
 | `account` | Show current account info and balances. |
 | `pools` | List available pools on the current network. |
+| `pool_info <pool>` | Query on-chain pool state (reserves, rate). |
 | `quote <pool> <dir> <amt>` | Get swap output estimate without executing. |
 | `swap <pool> <dir> <amt> [slip]` | Execute a swap. |
+| `lp_add <pool> <cur> <amt> [slip]` | Add liquidity. `<cur>`: `0` or `1`. |
 
 ### Arguments
 
@@ -198,6 +261,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `[type]` | `eoa`, `smart` | Account type (default: `eoa`). |
 | `<pool>` | `0`, `1`, ... | Pool index from `pools` output. |
 | `<dir>` | `0to1`, `1to0` | Swap direction. |
+| `<cur>` | `0`, `1` | Which currency to provide (other auto-calculated). |
 | `<amt>` | `"0.01"`, `"100"` | Human-readable token amount. |
 | `[slip]` | `1`, `0.5`, `3` | Slippage tolerance in % (default: `1`). |
 

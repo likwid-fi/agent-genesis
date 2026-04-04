@@ -128,8 +128,11 @@ function isNative(address) {
   return address.toLowerCase() === NATIVE_ADDRESS.toLowerCase();
 }
 
-function formatToken(amount, decimals, symbol) {
-  return `${formatUnits(amount, decimals)} ${symbol}`;
+function resolveRpc(config, networkConfig) {
+  if (process.env.RPC_URL) return http(process.env.RPC_URL);
+  if (networkConfig.rpc) return http(networkConfig.rpc);
+  // Fallback to viem's built-in chain RPC
+  return http();
 }
 
 // ======================= CLIENT SETUP =======================
@@ -139,19 +142,11 @@ function createClients(config, networkConfig) {
   if (!privateKey) return null;
 
   const chain = CHAINS[config.network];
-  const rpc = process.env.RPC_URL || networkConfig.rpc;
+  const transport = resolveRpc(config, networkConfig);
   const account = privateKeyToAccount(privateKey);
 
-  const publicClient = createPublicClient({
-    chain,
-    transport: http(rpc),
-  });
-
-  const walletClient = createWalletClient({
-    account,
-    chain,
-    transport: http(rpc),
-  });
+  const publicClient = createPublicClient({ chain, transport });
+  const walletClient = createWalletClient({ account, chain, transport });
 
   return { publicClient, walletClient, account, chain };
 }
@@ -161,11 +156,11 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
   const { signerToSimpleSmartAccount } = require("permissionless/accounts");
 
   const chain = CHAINS[config.network];
-  const rpc = process.env.RPC_URL || networkConfig.rpc;
+  const transport = resolveRpc(config, networkConfig);
   const bundlerUrl = process.env.BUNDLER_URL || networkConfig.bundlerUrl;
   const factoryAddress = networkConfig.smartAccountFactory;
 
-  const publicClient = createPublicClient({ chain, transport: http(rpc) });
+  const publicClient = createPublicClient({ chain, transport });
 
   const smartAccount = await signerToSimpleSmartAccount(publicClient, {
     signer: eoaAccount,
@@ -187,6 +182,71 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
   });
 
   return { smartAccount, smartAccountClient, bundlerClient, publicClient };
+}
+
+// ======================= SHARED EXECUTION =======================
+
+async function buildApprovalCall(publicClient, owner, tokenAddress, tokenSymbol, spender, amount) {
+  const currentAllowance = await publicClient.readContract({
+    address: tokenAddress, abi: ERC20_ABI, functionName: "allowance",
+    args: [owner, spender],
+  });
+  if (currentAllowance >= amount) return null;
+  console.log(`> Approving ${tokenSymbol}...`);
+  return {
+    to: tokenAddress, value: 0n,
+    data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [spender, amount] }),
+  };
+}
+
+async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) {
+  if (config.accountType === "smart") {
+    // --- Smart Account: batch all calls into a single UserOp ---
+    const { smartAccountClient } = await getSmartAccount(config, netConfig, eoaAccount);
+    console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
+    try {
+      const txHash = await smartAccountClient.sendTransactions({ transactions: calls });
+      console.log(`> UserOp submitted: ${txHash}`);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      if (receipt.status === "success") {
+        console.log(`> TX_OK`);
+        console.log(`> Transaction: ${txHash}`);
+        console.log(`> Block: ${receipt.blockNumber}`);
+        console.log(`> Gas used: ${receipt.gasUsed}`);
+      } else {
+        console.log(`> TX_REVERTED`);
+        console.log(`> Transaction: ${txHash}`);
+      }
+    } catch (e) {
+      console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
+    }
+  } else {
+    // --- EOA: execute calls sequentially ---
+    const chain = CHAINS[config.network];
+    const walletClient = createWalletClient({
+      account: eoaAccount, chain,
+      transport: resolveRpc(config, netConfig),
+    });
+    console.log(`> Submitting ${calls.length} transaction${calls.length > 1 ? "s" : ""}...`);
+    for (const call of calls) {
+      try {
+        const txHash = await walletClient.sendTransaction({
+          to: call.to, value: call.value, data: call.data,
+        });
+        console.log(`> Tx submitted: ${txHash}`);
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        if (receipt.status !== "success") {
+          console.log(`> TX_REVERTED: ${txHash}`);
+          return;
+        }
+      } catch (e) {
+        console.log(`> ERROR: Transaction failed: ${e.shortMessage || e.message}`);
+        return;
+      }
+    }
+    const lastCall = calls[calls.length - 1];
+    console.log(`> TX_OK`);
+  }
 }
 
 // ======================= COMMANDS =======================
@@ -375,8 +435,7 @@ async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
   const eoaAccount = privateKeyToAccount(privateKey);
 
   const chain = CHAINS[config.network];
-  const rpc = process.env.RPC_URL || netConfig.rpc;
-  const publicClient = createPublicClient({ chain, transport: http(rpc) });
+  const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
 
   let senderAddress;
   if (config.accountType === "smart") {
@@ -414,173 +473,226 @@ async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
   console.log(`> Sender: ${senderAddress}`);
   console.log(`> Account Type: ${config.accountType.toUpperCase()}`);
 
-  // --- Execute based on account type ---
-  if (config.accountType === "smart") {
-    await executeSwapSmart(config, netConfig, eoaAccount, publicClient, {
-      pool, poolId, zeroForOne, fromToken, toToken,
-      amountIn, amountOutMin, deadline, senderAddress,
-      pairPositionABI,
-    });
-  } else {
-    await executeSwapEOA(config, netConfig, eoaAccount, publicClient, {
-      pool, poolId, zeroForOne, fromToken, toToken,
-      amountIn, amountOutMin, deadline, senderAddress,
-      pairPositionABI,
-    });
-  }
-}
-
-// ======================= EOA EXECUTION =======================
-
-async function executeSwapEOA(config, netConfig, eoaAccount, publicClient, params) {
-  const { pool, poolId, zeroForOne, fromToken, toToken, amountIn, amountOutMin, deadline, senderAddress, pairPositionABI } = params;
-
-  const chain = CHAINS[config.network];
-  const rpc = process.env.RPC_URL || netConfig.rpc;
-  const walletClient = createWalletClient({
-    account: eoaAccount,
-    chain,
-    transport: http(rpc),
-  });
-
+  // --- Build calls ---
   const pairPositionAddress = netConfig.contracts.LikwidPairPosition;
   const sendingNative = isNative(fromToken.address);
-
-  // --- Approve if selling ERC20 ---
-  if (!sendingNative) {
-    const currentAllowance = await publicClient.readContract({
-      address: fromToken.address,
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [senderAddress, pairPositionAddress],
-    });
-
-    if (currentAllowance < amountIn) {
-      console.log(`> Approving ${fromToken.symbol} for LikwidPairPosition...`);
-      const approveTx = await walletClient.writeContract({
-        address: fromToken.address,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [pairPositionAddress, amountIn],
-      });
-      console.log(`> Approval tx: ${approveTx}`);
-      await publicClient.waitForTransactionReceipt({ hash: approveTx });
-      console.log(`> Approval confirmed.`);
-    }
-  }
-
-  // --- Execute swap ---
-  console.log(`> Submitting swap transaction...`);
-
-  const swapParams = {
-    poolId,
-    zeroForOne,
-    to: senderAddress,
-    amountIn,
-    amountOutMin,
-    deadline,
-  };
-
-  try {
-    const txHash = await walletClient.writeContract({
-      address: pairPositionAddress,
-      abi: pairPositionABI,
-      functionName: "exactInput",
-      args: [swapParams],
-      value: sendingNative ? amountIn : 0n,
-    });
-
-    console.log(`> Tx submitted: ${txHash}`);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-
-    if (receipt.status === "success") {
-      console.log(`> SWAP_OK`);
-      console.log(`> Transaction: ${txHash}`);
-      console.log(`> Block: ${receipt.blockNumber}`);
-      console.log(`> Gas used: ${receipt.gasUsed}`);
-    } else {
-      console.log(`> SWAP_REVERTED`);
-      console.log(`> Transaction: ${txHash}`);
-    }
-  } catch (e) {
-    console.log(`> ERROR: Swap failed: ${e.shortMessage || e.message}`);
-  }
-}
-
-// ======================= SMART ACCOUNT EXECUTION =======================
-
-async function executeSwapSmart(config, netConfig, eoaAccount, publicClient, params) {
-  const { pool, poolId, zeroForOne, fromToken, toToken, amountIn, amountOutMin, deadline, senderAddress, pairPositionABI } = params;
-
-  const { smartAccount, smartAccountClient } = await getSmartAccount(config, netConfig, eoaAccount);
-  const pairPositionAddress = netConfig.contracts.LikwidPairPosition;
-  const sendingNative = isNative(fromToken.address);
-
   const calls = [];
 
-  // --- Approve if selling ERC20 ---
+  // Approve if selling ERC20
   if (!sendingNative) {
-    const currentAllowance = await publicClient.readContract({
-      address: fromToken.address,
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [senderAddress, pairPositionAddress],
-    });
-
-    if (currentAllowance < amountIn) {
-      console.log(`> Approving ${fromToken.symbol} for LikwidPairPosition...`);
-      calls.push({
-        to: fromToken.address,
-        value: 0n,
-        data: encodeFunctionData({
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [pairPositionAddress, amountIn],
-        }),
-      });
-    }
+    const approvalCall = await buildApprovalCall(publicClient, senderAddress, fromToken.address, fromToken.symbol, pairPositionAddress, amountIn);
+    if (approvalCall) calls.push(approvalCall);
   }
 
-  // --- Swap call ---
-  const swapParams = {
-    poolId,
-    zeroForOne,
-    to: senderAddress,
-    amountIn,
-    amountOutMin,
-    deadline,
-  };
-
+  // Swap call
   calls.push({
     to: pairPositionAddress,
     value: sendingNative ? amountIn : 0n,
     data: encodeFunctionData({
       abi: pairPositionABI,
       functionName: "exactInput",
-      args: [swapParams],
+      args: [{
+        poolId, zeroForOne, to: senderAddress,
+        amountIn, amountOutMin, deadline,
+      }],
     }),
   });
 
-  console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
+  await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
+}
+
+// ======================= POOL INFO =======================
+
+async function cmd_pool_info(poolIndexStr) {
+  if (poolIndexStr === undefined) {
+    console.log(`> Usage: pool_info <poolIndex>`);
+    return;
+  }
+
+  const config = loadConfig();
+  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
+
+  const netConfig = loadNetworkConfig(config.network);
+  if (!netConfig) return;
+
+  const poolIndex = parseInt(poolIndexStr);
+  const pool = netConfig.pools[poolIndex];
+  if (!pool) return console.log(`> ERROR: Pool index ${poolIndex} not found. Run "pools" to see available pools.`);
+
+  const poolId = computePoolId(pool);
+  const helperABI = loadABI("LikwidHelper");
+  const clients = createClients(config, netConfig);
+  if (!clients) return;
 
   try {
-    const txHash = await smartAccountClient.sendTransactions({ transactions: calls });
+    const stateInfo = await clients.publicClient.readContract({
+      address: netConfig.contracts.LikwidHelper,
+      abi: helperABI,
+      functionName: "getPoolStateInfo",
+      args: [poolId],
+    });
 
-    console.log(`> UserOp submitted: ${txHash}`);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+    const r0 = stateInfo.pairReserve0;
+    const r1 = stateInfo.pairReserve1;
 
-    if (receipt.status === "success") {
-      console.log(`> SWAP_OK`);
-      console.log(`> Transaction: ${txHash}`);
-      console.log(`> Block: ${receipt.blockNumber}`);
-      console.log(`> Gas used: ${receipt.gasUsed}`);
-    } else {
-      console.log(`> SWAP_REVERTED`);
-      console.log(`> Transaction: ${txHash}`);
+    if (r0 === 0n && r1 === 0n) {
+      console.log(`> POOL_NOT_INITIALIZED`);
+      console.log(`> Pool: [${poolIndex}] ${pool.name}`);
+      console.log(`> This pool has no liquidity. You need to Create a Pair first.`);
+      return;
     }
+
+    const rate0to1 = Number(r1) / Number(r0);
+    const rate1to0 = Number(r0) / Number(r1);
+
+    console.log(`> POOL_INFO`);
+    console.log(`> Pool: [${poolIndex}] ${pool.name}`);
+    console.log(`> Pool ID: ${poolId}`);
+    console.log(`> Pair Reserve ${pool.currency0.symbol}: ${formatUnits(r0, pool.currency0.decimals)}`);
+    console.log(`> Pair Reserve ${pool.currency1.symbol}: ${formatUnits(r1, pool.currency1.decimals)}`);
+    console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate0to1.toFixed(6)} ${pool.currency1.symbol}`);
+    console.log(`> Rate: 1 ${pool.currency1.symbol} = ${rate1to0.toFixed(6)} ${pool.currency0.symbol}`);
+    console.log(`> Total Supply: ${formatUnits(stateInfo.totalSupply, 18)}`);
   } catch (e) {
-    console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
+    console.log(`> ERROR: Could not query pool state: ${e.shortMessage || e.message}`);
   }
+}
+
+// ======================= ADD LIQUIDITY =======================
+
+async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1") {
+  if (!poolIndexStr || !currencyStr || !amountStr) {
+    console.log(`> Usage: lp_add <poolIndex> <currency> <amount> [slippage%]`);
+    console.log(`> Currency: 0 (currency0) or 1 (currency1)`);
+    console.log(`> Provide the amount for one side; the other is auto-calculated from pool ratio.`);
+    return;
+  }
+
+  const config = loadConfig();
+  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
+
+  const netConfig = loadNetworkConfig(config.network);
+  if (!netConfig) return;
+
+  const poolIndex = parseInt(poolIndexStr);
+  const pool = netConfig.pools[poolIndex];
+  if (!pool) return console.log(`> ERROR: Pool index ${poolIndex} not found. Run "pools" to see available pools.`);
+
+  const inputSide = parseInt(currencyStr);
+  if (inputSide !== 0 && inputSide !== 1) {
+    return console.log(`> ERROR: Currency must be 0 or 1.`);
+  }
+
+  const inputToken = inputSide === 0 ? pool.currency0 : pool.currency1;
+  const otherToken = inputSide === 0 ? pool.currency1 : pool.currency0;
+  const inputAmount = parseUnits(amountStr, inputToken.decimals);
+  const slippage = BigInt(slippageStr);
+  const poolId = computePoolId(pool);
+
+  const helperABI = loadABI("LikwidHelper");
+  const pairPositionABI = loadABI("LikwidPairPosition");
+
+  // --- Resolve sender ---
+  const privateKey = readPrivateKey(config.keyFilePath);
+  if (!privateKey) return;
+  const eoaAccount = privateKeyToAccount(privateKey);
+  const chain = CHAINS[config.network];
+  const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
+
+  let senderAddress;
+  if (config.accountType === "smart") {
+    try {
+      const { smartAccount } = await getSmartAccount(config, netConfig, eoaAccount);
+      senderAddress = smartAccount.address;
+    } catch (e) {
+      return console.log(`> ERROR: Could not resolve Smart Account: ${e.message}`);
+    }
+  } else {
+    senderAddress = eoaAccount.address;
+  }
+
+  // --- Query pool state ---
+  let r0, r1;
+  try {
+    const stateInfo = await publicClient.readContract({
+      address: netConfig.contracts.LikwidHelper,
+      abi: helperABI,
+      functionName: "getPoolStateInfo",
+      args: [poolId],
+    });
+    r0 = stateInfo.pairReserve0;
+    r1 = stateInfo.pairReserve1;
+  } catch (e) {
+    return console.log(`> ERROR: Could not query pool state: ${e.shortMessage || e.message}`);
+  }
+
+  if (r0 === 0n && r1 === 0n) {
+    console.log(`> POOL_NOT_INITIALIZED`);
+    console.log(`> Pool: [${poolIndex}] ${pool.name}`);
+    console.log(`> This pool has no liquidity. You need to Create a Pair first.`);
+    return;
+  }
+
+  // --- Calculate matching amount ---
+  let amount0, amount1;
+  if (inputSide === 0) {
+    amount0 = inputAmount;
+    amount1 = r0 > 0n ? (inputAmount * r1) / r0 : 0n;
+  } else {
+    amount1 = inputAmount;
+    amount0 = r1 > 0n ? (inputAmount * r0) / r1 : 0n;
+  }
+
+  const amount0Min = (amount0 * (100n - slippage)) / 100n;
+  const amount1Min = (amount1 * (100n - slippage)) / 100n;
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+
+  const rate = Number(r1) / Number(r0);
+
+  console.log(`> LP_ADD: [${poolIndex}] ${pool.name}`);
+  console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
+  console.log(`> ${pool.currency0.symbol}: ${formatUnits(amount0, pool.currency0.decimals)}`);
+  console.log(`> ${pool.currency1.symbol}: ${formatUnits(amount1, pool.currency1.decimals)}`);
+  console.log(`> Slippage: ${slippageStr}%`);
+  console.log(`> Sender: ${senderAddress}`);
+
+  // --- Build calls ---
+  const pairPositionAddress = netConfig.contracts.LikwidPairPosition;
+  const native0 = isNative(pool.currency0.address);
+  const native1 = isNative(pool.currency1.address);
+  const calls = [];
+
+  // Approve ERC20 tokens
+  if (!native0 && amount0 > 0n) {
+    const call = await buildApprovalCall(publicClient, senderAddress, pool.currency0.address, pool.currency0.symbol, pairPositionAddress, amount0);
+    if (call) calls.push(call);
+  }
+  if (!native1 && amount1 > 0n) {
+    const call = await buildApprovalCall(publicClient, senderAddress, pool.currency1.address, pool.currency1.symbol, pairPositionAddress, amount1);
+    if (call) calls.push(call);
+  }
+
+  // Build PoolKey struct
+  const poolKey = {
+    currency0: pool.currency0.address,
+    currency1: pool.currency1.address,
+    fee: pool.fee,
+    marginFee: pool.marginFee,
+  };
+
+  const nativeValue = (native0 ? amount0 : 0n) + (native1 ? amount1 : 0n);
+
+  calls.push({
+    to: pairPositionAddress,
+    value: nativeValue,
+    data: encodeFunctionData({
+      abi: pairPositionABI,
+      functionName: "addLiquidity",
+      args: [poolKey, senderAddress, amount0, amount1, amount0Min, amount1Min, deadline],
+    }),
+  });
+
+  await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
 }
 
 // ======================= CLI ROUTER =======================
@@ -602,10 +714,12 @@ Setup:
 
 Pool Info:
   pools                                     List available pools on current network.
+  pool_info <pool>                          Query on-chain pool state (reserves, rate).
   quote <pool> <dir> <amount>               Get swap quote without executing.
 
 DeFi Actions:
   swap <pool> <dir> <amount> [slippage%]    Execute swap.
+  lp_add <pool> <currency> <amt> [slip%]    Add liquidity. currency: 0 or 1.
 
 Arguments:
   <pool>      Pool index from "pools" command (e.g., 0, 1)
@@ -631,8 +745,14 @@ Arguments:
         case "quote":
           await cmd_quote(args[1], args[2], args[3]);
           break;
+        case "pool_info":
+          await cmd_pool_info(args[1]);
+          break;
         case "swap":
           await cmd_swap(args[1], args[2], args[3], args[4]);
+          break;
+        case "lp_add":
+          await cmd_lp_add(args[1], args[2], args[3], args[4]);
           break;
         default:
           console.log(`> Unknown command: ${command}`);
