@@ -1,13 +1,13 @@
 ---
 name: likwid-fi
 version: 1.0.0
-description: Likwid.fi Protocol Universal Skill — swap, liquidity, margin, and lending on the Likwid DeFi protocol. Standalone, no dependency on agent-genesis.
+description: Likwid.fi Protocol Universal Skill — swap, liquidity, margin, and lending on the Likwid DeFi protocol.
 homepage: https://likwid.fi
 ---
 
 # Likwid.fi Protocol Universal Skill
 
-Interact with the **Likwid Protocol** — a unified DeFi protocol for swaps, liquidity provision, margin trading, and lending. This skill is fully standalone and works with any EOA wallet or ERC-4337 Smart Account.
+Interact with the **Likwid Protocol** — a unified DeFi protocol for swaps, liquidity provision, margin trading, and lending. Works with any EOA wallet or ERC-4337 Smart Account.
 
 ## Skill Architecture
 
@@ -16,6 +16,7 @@ Interact with the **Likwid Protocol** — a unified DeFi protocol for swaps, liq
 | **SKILL.md** (this file) | Skill documentation and agent workflow |
 | **likwid-fi.js** | CLI implementation |
 | **package.json** | Dependencies (viem, permissionless) |
+| **bootstrap.sh** | One-line install script |
 | **abi/** | On-chain contract ABIs |
 | **pools/** | Per-network pool & contract configuration |
 
@@ -31,17 +32,29 @@ Interact with the **Likwid Protocol** — a unified DeFi protocol for swaps, liq
 
 ## 0. First Load — Setup
 
-**When this skill is first loaded**, you MUST configure it before any DeFi operation.
+**When this skill is first loaded**, you MUST run the bootstrap and configure it before any DeFi operation. Do NOT silently proceed.
 
-### Step 1: Install Dependencies
+### Fast Path (preferred)
+
+If the skill is already installed locally, reuse it immediately:
 
 ```bash
-cd <skill_directory> && npm install
+test -f ~/.openclaw/skills/agent-genesis/likwid-fi/likwid-fi.js && echo "skill present"
 ```
 
-### Step 2: Interactive Setup
+### Standard Install / Update
 
-Ask the user for three things:
+Run the bootstrap script to install or update everything in one shot:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/v2.0-dev/likwid-fi/bootstrap.sh)
+```
+
+After bootstrap, all commands run from `~/.openclaw/skills/agent-genesis/likwid-fi/`.
+
+### Step 1: Interactive Setup
+
+After bootstrap completes, ask the user for three things:
 
 1. **Network** — Which network to operate on?
    > Available: `sepolia`, `ethereum`, `base`
@@ -59,7 +72,7 @@ Ask the user for three things:
 Then run:
 
 ```bash
-cd <skill_directory> && node likwid-fi.js setup <network> <keyFilePath> <accountType>
+node likwid-fi.js setup <network> <keyFilePath> <accountType>
 ```
 
 **Report to human:**
@@ -76,7 +89,7 @@ cd <skill_directory> && node likwid-fi.js setup <network> <keyFilePath> <account
 ### Step 3: Verify Account
 
 ```bash
-cd <skill_directory> && node likwid-fi.js account
+node likwid-fi.js account
 ```
 
 Show the user their balances and addresses.
@@ -90,7 +103,7 @@ Swap tokens on any Likwid pool.
 ### Step 1: List Available Pools
 
 ```bash
-cd <skill_directory> && node likwid-fi.js pools
+node likwid-fi.js pools
 ```
 
 **Report to human:**
@@ -107,7 +120,7 @@ cd <skill_directory> && node likwid-fi.js pools
 Before executing, always preview the swap:
 
 ```bash
-cd <skill_directory> && node likwid-fi.js quote <poolIndex> <direction> <amount>
+node likwid-fi.js quote <poolIndex> <direction> <amount>
 ```
 
 **Direction:**
@@ -128,7 +141,7 @@ cd <skill_directory> && node likwid-fi.js quote <poolIndex> <direction> <amount>
 ### Step 3: Execute Swap
 
 ```bash
-cd <skill_directory> && node likwid-fi.js swap <poolIndex> <direction> <amount> [slippage%]
+node likwid-fi.js swap <poolIndex> <direction> <amount> [slippage%]
 ```
 
 Default slippage: 1%.

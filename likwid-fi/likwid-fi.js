@@ -29,6 +29,7 @@ const { sepolia, mainnet, base } = require("viem/chains");
 const { privateKeyToAccount } = require("viem/accounts");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 // ======================= PATHS =======================
 
@@ -82,8 +83,19 @@ function loadABI(name) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function expandHome(p) {
+  if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
+
+function collapseHome(p) {
+  const home = os.homedir();
+  if (p.startsWith(home + "/")) return "~" + p.slice(home.length);
+  return p;
+}
+
 function readPrivateKey(keyFilePath) {
-  const resolved = path.resolve(keyFilePath);
+  const resolved = path.resolve(expandHome(keyFilePath));
   if (!fs.existsSync(resolved)) {
     console.log(`> ERROR: Private key file not found: ${resolved}`);
     return null;
@@ -199,16 +211,15 @@ async function cmd_setup(network, keyFilePath, accountType = "eoa") {
   if (!privateKey) return;
 
   const account = privateKeyToAccount(privateKey);
-  const resolvedPath = path.resolve(keyFilePath);
 
-  const cfg = { network, keyFilePath: resolvedPath, accountType: accountType.toLowerCase() };
+  const cfg = { network, keyFilePath: collapseHome(path.resolve(expandHome(keyFilePath))), accountType: accountType.toLowerCase() };
   saveConfig(cfg);
 
   console.log(`> SETUP_OK`);
   console.log(`> Network: ${netConfig.network} (Chain ID ${netConfig.chainId})`);
   console.log(`> EOA Address: ${account.address}`);
   console.log(`> Account Type: ${cfg.accountType.toUpperCase()}`);
-  console.log(`> Key File: ${resolvedPath}`);
+  console.log(`> Key File: ${cfg.keyFilePath}`);
 
   if (cfg.accountType === "smart") {
     try {
@@ -324,7 +335,7 @@ async function cmd_quote(poolIndexStr, direction, amountStr) {
     console.log(`> Pool: [${poolIndex}] ${pool.name}`);
     console.log(`> Input: ${amountStr} ${fromToken.symbol}`);
     console.log(`> Output: ~${formatUnits(amountOut, toToken.decimals)} ${toToken.symbol}`);
-    console.log(`> Fee: ${fee / 100}% (${formatUnits(feeAmount, fromToken.decimals)} ${fromToken.symbol})`);
+    console.log(`> Fee: ${(fee / 10000).toFixed(2)}% (${formatUnits(feeAmount, fromToken.decimals)} ${fromToken.symbol})`);
   } catch (e) {
     console.log(`> ERROR: Quote failed: ${e.shortMessage || e.message}`);
   }

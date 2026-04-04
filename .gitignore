@@ -1,3 +1,9 @@
+# Always ignore Node.js artifacts (overrides any un-ignore rules below)
+node_modules/
+package-lock.json
+.npmrc
+.node_repl_history
+
 # Ignore all files
 *
 
@@ -26,5 +32,6 @@
 !likwid-fi/package.json
 !likwid-fi/abi/*.json
 !likwid-fi/pools/*.json
+!likwid-fi/bootstrap.sh
 # Ignore unnecessary special cases
 !*/
