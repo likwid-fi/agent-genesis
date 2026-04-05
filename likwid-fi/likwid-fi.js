@@ -188,8 +188,7 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
   const smartAccount = await toSimple7702SmartAccount({
     client: publicClient,
     owner: eoaAccount,
-    implementation: networkConfig.simple7702Implementation,
-    entryPoint: "0.8",
+    entryPoint: "0.9",
   });
 
   const bundlerTransport = resolveBundlerTransport(networkConfig);
@@ -258,20 +257,24 @@ async function submitUserOp(bundlerClient, calls, options = {}) {
   }
 }
 
-async function getEip7702Authorization(publicClient, walletClient, netConfig) {
+async function getEip7702Authorization(publicClient, walletClient, implementationAddress) {
   const code = await publicClient.getCode({ address: walletClient.account.address });
-  const isDelegated = code && code !== "0x" && code.startsWith("0xef0100");
-  if (isDelegated) return null;
-
-  console.log(`> Signing EIP-7702 authorization (first-time delegation)...`);
+  if (code && code !== "0x" && code.startsWith("0xef0100")) {
+    // Check if current delegation matches the expected implementation
+    const currentImpl = "0x" + code.slice(8);
+    if (currentImpl.toLowerCase() === implementationAddress.toLowerCase()) return null;
+    console.log(`> Re-delegating EIP-7702 (${currentImpl.slice(0, 10)}... -> ${implementationAddress.slice(0, 10)}...)...`);
+  } else {
+    console.log(`> Signing EIP-7702 authorization (first-time delegation)...`);
+  }
   return signAuthorization(walletClient, {
-    contractAddress: netConfig.simple7702Implementation,
+    contractAddress: implementationAddress,
   });
 }
 
 async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) {
   if (config.accountType === "smart") {
-    const { bundlerClient } = await getSmartAccount(config, netConfig, eoaAccount);
+    const { smartAccount, bundlerClient } = await getSmartAccount(config, netConfig, eoaAccount);
 
     // Sign EIP-7702 authorization if EOA hasn't been delegated yet
     const chain = CHAINS[config.network];
@@ -279,7 +282,7 @@ async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) 
       account: eoaAccount, chain,
       transport: resolveRpc(config, netConfig),
     });
-    const authorization = await getEip7702Authorization(publicClient, walletClient, netConfig);
+    const authorization = await getEip7702Authorization(publicClient, walletClient, smartAccount.authorization.address);
     const userOpOptions = authorization ? { authorization } : {};
 
     // Non-standard ERC-20 tokens (e.g. USDT) can fail when approve + swap are
