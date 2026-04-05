@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 import {BasePaymaster} from "@account-abstraction/contracts/core/BasePaymaster.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
-import {UserOperation} from "@account-abstraction/contracts/interfaces/UserOperation.sol";
+import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
@@ -26,6 +25,12 @@ import {MineSignatureLib} from "./libraries/MineSignatureLib.sol";
 contract AgentPaymaster is BasePaymaster {
     using SafeERC20 for IERC20;
 
+    struct Call {
+        address target;
+        uint256 value;
+        bytes data;
+    }
+
     // --- Config ---
     IERC20 public immutable AGC_TOKEN;
     IVault public immutable VAULT;
@@ -43,7 +48,7 @@ contract AgentPaymaster is BasePaymaster {
     // --- User State ---
     mapping(address => bool) public hasFreeMined;
 
-    constructor(IEntryPoint _entryPoint, address _agcToken) BasePaymaster(_entryPoint) Ownable(msg.sender) {
+    constructor(IEntryPoint _entryPoint, address _agcToken) BasePaymaster(_entryPoint, msg.sender) {
         AGC_TOKEN = IERC20(_agcToken);
         AgentGenesisCoin agc = AgentGenesisCoin(payable(address(_agcToken)));
         mineSigner = agc.mineSigner();
@@ -100,7 +105,7 @@ contract AgentPaymaster is BasePaymaster {
 
         bytes4 outerSelector = bytes4(callData[0:4]);
 
-        // SimpleAccount execute: execute(address dest, uint256 value, bytes func) (0xb61d27f6)
+        // Simple7702Account execute: execute(address target, uint256 value, bytes data) (0xb61d27f6)
         if (outerSelector == 0xb61d27f6) {
             (address dest,, bytes memory func) = abi.decode(callData[4:], (address, uint256, bytes));
             if (dest == address(AGC_TOKEN) && func.length >= 4) {
@@ -116,17 +121,17 @@ contract AgentPaymaster is BasePaymaster {
             }
             return false;
         }
-        // SimpleAccount executeBatch: executeBatch(address[] dest, bytes[] func) (0x47e1da2a)
-        else if (outerSelector == 0x47e1da2a) {
-            (address[] memory targets, bytes[] memory datas) = abi.decode(callData[4:], (address[], bytes[]));
-            if (targets.length == 0 || targets.length != datas.length) return false;
+        // Simple7702Account executeBatch: executeBatch((address,uint256,bytes)[]) (0x34fcd5be)
+        else if (outerSelector == 0x34fcd5be) {
+            (Call[] memory calls) = abi.decode(callData[4:], (Call[]));
+            if (calls.length == 0) return false;
 
-            for (uint256 i = 0; i < targets.length; i++) {
-                if (targets[i] != address(AGC_TOKEN)) return false;
-                if (datas[i].length < 4) return false;
+            for (uint256 i = 0; i < calls.length; i++) {
+                if (calls[i].target != address(AGC_TOKEN)) return false;
+                if (calls[i].data.length < 4) return false;
 
                 bytes4 innerSelector;
-                bytes memory funcData = datas[i];
+                bytes memory funcData = calls[i].data;
                 assembly {
                     innerSelector := mload(add(funcData, 32))
                 }
@@ -145,7 +150,7 @@ contract AgentPaymaster is BasePaymaster {
     }
 
     function _validatePaymasterUserOp(
-        UserOperation calldata userOp,
+        PackedUserOperation calldata userOp,
         bytes32,
         /*userOpHash*/
         uint256 maxCost
@@ -162,7 +167,8 @@ contract AgentPaymaster is BasePaymaster {
         }
 
         // Mode 1 = Charge AGC
-        require(userOp.verificationGasLimit > POST_OP_GAS, "Paymaster: gas too low for postOp");
+        uint256 verificationGasLimit = uint128(uint256(userOp.accountGasLimits) >> 128);
+        require(verificationGasLimit > POST_OP_GAS, "Paymaster: gas too low for postOp");
         require(cachedPairReserves != ReservesLibrary.ZERO_RESERVES, "Paymaster: reserves not initialized");
 
         // Calculate maxCost in AGC (currency1, so zeroForOne = false)
@@ -176,7 +182,10 @@ contract AgentPaymaster is BasePaymaster {
         return (context, 0);
     }
 
-    function _postOp(PostOpMode, bytes calldata context, uint256 actualGasCost) internal override {
+    function _postOp(PostOpMode, bytes calldata context, uint256 actualGasCost, uint256 actualUserOpFeePerGas)
+        internal
+        override
+    {
         (uint8 paymasterMode, address sender, uint256 amountIn, uint256 maxCost) =
             abi.decode(context, (uint8, address, uint256, uint256));
 
@@ -192,7 +201,7 @@ contract AgentPaymaster is BasePaymaster {
             AGC_TOKEN.forceApprove(address(POSITION_MANAGER), amountIn);
 
             // Add estimated overhead cost for the postOp swap and subsequent operations
-            uint256 overheadCost = POST_OP_GAS * tx.gasprice;
+            uint256 overheadCost = POST_OP_GAS * actualUserOpFeePerGas;
             uint256 totalCostToRecover = actualGasCost + overheadCost;
 
             if (totalCostToRecover > maxCost) {
@@ -245,7 +254,7 @@ contract AgentPaymaster is BasePaymaster {
      */
     receive() external payable {
         if (msg.value > 0) {
-            entryPoint.depositTo{value: msg.value}(address(this));
+            entryPoint().depositTo{value: msg.value}(address(this));
         }
     }
 }

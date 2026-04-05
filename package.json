@@ -10,7 +10,7 @@
     "@reclaimprotocol/zk-fetch": "^0.8.0",
     "axios": "^1.6.7",
     "ethers": "^6.16.0",
-    "permissionless": "^0.1.47",
-    "viem": "^2.17.0"
+    "permissionless": "^0.3.4",
+    "viem": "^2.47.10"
   }
 }

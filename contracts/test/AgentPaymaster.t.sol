@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {AgentPaymaster} from "../src/AgentPaymaster.sol";
@@ -20,7 +20,7 @@ contract AgentPaymasterTest is Test {
     AgentGenesisCoin public coin;
     address public signer;
     uint256 public signerKey;
-    address public entryPoint = address(0x123);
+    address public entryPoint;
     address public user = address(0x456);
 
     function setUp() public {
@@ -32,6 +32,9 @@ contract AgentPaymasterTest is Test {
 
         // Deploy coin
         coin = new AgentGenesisCoin(signer, mockPm);
+
+        // Deploy a mock EntryPoint that supports IERC165
+        entryPoint = address(new MockEntryPoint());
 
         // Deploy paymaster harness
         paymaster = new AgentPaymasterHarness(IEntryPoint(entryPoint), address(coin));
@@ -53,10 +56,9 @@ contract AgentPaymasterTest is Test {
         // Encode the mine() call
         bytes memory mineCall = abi.encodeWithSelector(AgentGenesisCoin.mine.selector, score, signature, nonce);
 
-        // Encode the SimpleAccount execute() call
-        // execute(address dest, uint256 value, bytes func)
+        // Encode the execute() call: execute(address dest, uint256 value, bytes func) (0xb61d27f6)
         bytes memory executeCall = abi.encodeWithSelector(
-            0xb61d27f6, // execute
+            0xb61d27f6,
             address(coin),
             0,
             mineCall
@@ -82,21 +84,12 @@ contract AgentPaymasterTest is Test {
         bytes memory signature2 = _generateSignature(user, nonce2, score2);
         bytes memory mineCall2 = abi.encodeWithSelector(AgentGenesisCoin.mine.selector, score2, signature2, nonce2);
 
-        address[] memory targets = new address[](2);
-        targets[0] = address(coin);
-        targets[1] = address(coin);
+        // Encode v0.8 executeBatch: executeBatch((address,uint256,bytes)[]) (0x34fcd5be)
+        AgentPaymaster.Call[] memory calls = new AgentPaymaster.Call[](2);
+        calls[0] = AgentPaymaster.Call({target: address(coin), value: 0, data: mineCall1});
+        calls[1] = AgentPaymaster.Call({target: address(coin), value: 0, data: mineCall2});
 
-        bytes[] memory datas = new bytes[](2);
-        datas[0] = mineCall1;
-        datas[1] = mineCall2;
-
-        // Encode the SimpleAccount executeBatch() call
-        // executeBatch(address[] dest, bytes[] func)
-        bytes memory executeBatchCall = abi.encodeWithSelector(
-            0x47e1da2a, // executeBatch
-            targets,
-            datas
-        );
+        bytes memory executeBatchCall = abi.encodeWithSelector(0x34fcd5be, calls);
 
         // Test with the correct sender
         bool isFree = paymaster.isFreeMine(executeBatchCall, user);
@@ -130,19 +123,12 @@ contract AgentPaymasterTest is Test {
 
         bytes memory notMineCall = abi.encodeWithSignature("transfer(address,uint256)", address(0x111), 100);
 
-        address[] memory targets = new address[](2);
-        targets[0] = address(coin);
-        targets[1] = address(coin);
+        // Encode v0.8 executeBatch with mixed calls
+        AgentPaymaster.Call[] memory calls = new AgentPaymaster.Call[](2);
+        calls[0] = AgentPaymaster.Call({target: address(coin), value: 0, data: mineCall1});
+        calls[1] = AgentPaymaster.Call({target: address(coin), value: 0, data: notMineCall});
 
-        bytes[] memory datas = new bytes[](2);
-        datas[0] = mineCall1;
-        datas[1] = notMineCall;
-
-        bytes memory executeBatchCall = abi.encodeWithSelector(
-            0x47e1da2a, // executeBatch
-            targets,
-            datas
-        );
+        bytes memory executeBatchCall = abi.encodeWithSelector(0x34fcd5be, calls);
 
         bool isFree = paymaster.isFreeMine(executeBatchCall, user);
         assertFalse(isFree, "Should be false for mixed executeBatch");
@@ -152,5 +138,31 @@ contract AgentPaymasterTest is Test {
 contract MockPositionManager {
     function vault() external pure returns (address) {
         return address(0x111);
+    }
+}
+
+contract MockEntryPoint {
+    // Implement IERC165.supportsInterface to return true for IEntryPoint
+    function supportsInterface(bytes4) external pure returns (bool) {
+        return true;
+    }
+
+    // Minimal stubs required by BasePaymaster
+    function balanceOf(address) external pure returns (uint256) {
+        return 0;
+    }
+
+    function depositTo(address) external payable {}
+
+    function addStake(uint32) external payable {}
+
+    function unlockStake() external {}
+
+    function withdrawStake(address payable) external {}
+
+    function withdrawTo(address payable, uint256) external {}
+
+    function getNonce(address, uint192) external pure returns (uint256) {
+        return 0;
     }
 }

@@ -5,20 +5,19 @@
  * Includes all infrastructure: viem clients, ERC-4337 smart account, bundler, UserOp execution.
  */
 
-const { createSmartAccountClient, createBundlerClient, ENTRYPOINT_ADDRESS_V06 } = require("permissionless");
-const { signerToSimpleSmartAccount } = require("permissionless/accounts");
 const {
   createPublicClient,
-  custom,
+  createWalletClient,
   http,
   parseEther,
-  toHex,
   encodeFunctionData,
   parseAbi,
   toFunctionSelector,
   keccak256,
   encodeAbiParameters,
 } = require("viem");
+const { signAuthorization } = require("viem/actions");
+const { toSimple7702SmartAccount, createBundlerClient } = require("viem/account-abstraction");
 const { sepolia } = require("viem/chains");
 const { privateKeyToAccount, generatePrivateKey } = require("viem/accounts");
 const fs = require("fs");
@@ -34,16 +33,15 @@ const CHAIN_ID = CHAIN.id;
 
 const VERIFIER_URL = "https://verifier.likwid.fi";
 const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
-const BUNDLER_URL = process.env.BUNDLER_URL || "https://bundler.particle.network";
+const BUNDLER_URL = process.env.BUNDLER_URL || "https://api.candide.dev/public/v3/sepolia";
 
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F";
-const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3";
+const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x7262bA32E60702cFc388D93c3366485539eD79bB";
+const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xdc78BA247821CDB0A3fe96EaDF4e20cEF86e5EDc";
 
-const ENTRY_POINT_ADDRESS = ENTRYPOINT_ADDRESS_V06;
-const SMART_ACCOUNT_FACTORY_ADDRESS = "0x9406Cc6185a346906296840746125a0E44976454";
+const SIMPLE_7702_IMPLEMENTATION = "0xa46cc63eBF4Bd77888AA327837d20b23A63a56B5";
 
 // Likwid Helper — used for pool price queries (cost calculation, AGC precharge estimation)
 const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
@@ -97,106 +95,25 @@ const publicClient = createPublicClient({
 
 // ======================= BUNDLER =======================
 
-let bundlerRequestId = 0;
-
-function serializeRpcValue(value) {
-  if (typeof value === "bigint") return toHex(value);
-  if (Array.isArray(value)) return value.map(serializeRpcValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, serializeRpcValue(nested)]));
-  }
-  return value;
-}
-
-async function bundlerRequest(method, params) {
-  const response = await fetch(BUNDLER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: ++bundlerRequestId,
-      chainId: CHAIN_ID,
-      method,
-      params: serializeRpcValue(params),
-    }),
-  });
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || response.statusText);
-  }
-  if (payload.error) {
-    const error = new Error(payload.error.message || "Bundler request failed");
-    error.code = payload.error.code;
-    error.extraData = payload.error.extraData;
-    throw error;
-  }
-  return payload.result;
-}
-
-function createParticleBundlerTransport() {
-  return custom({
-    request: ({ method, params }) => bundlerRequest(method, params),
-  });
-}
-
-const bundlerTransport = createParticleBundlerTransport();
-
-const bundlerClient = createBundlerClient({
-  chain: CHAIN,
-  entryPoint: ENTRY_POINT_ADDRESS,
-  transport: bundlerTransport,
-});
-
-async function estimateUserOperationGas(userOperation) {
-  return bundlerClient.estimateUserOperationGas({ userOperation });
-}
-
-async function estimateParticleUserOperationGasRaw(userOperation) {
-  return bundlerRequest("eth_estimateUserOperationGas", [userOperation, ENTRY_POINT_ADDRESS]);
-}
-
-async function getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices) {
-  const opToEstimate = {
-    ...userOperation,
-    paymasterAndData: AGENT_PAYMASTER_ADDRESS,
-    maxFeePerGas: fallbackGasPrices.maxFeePerGas,
-    maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
-  };
-
-  const [estimate, rawEstimate] = await Promise.all([
-    estimateUserOperationGas(opToEstimate),
-    estimateParticleUserOperationGasRaw(opToEstimate),
-  ]);
-
-  return {
-    ...estimate,
-    maxFeePerGas: rawEstimate.maxFeePerGas ?? fallbackGasPrices.maxFeePerGas,
-    maxPriorityFeePerGas: rawEstimate.maxPriorityFeePerGas ?? fallbackGasPrices.maxPriorityFeePerGas,
-    paymasterAndData: AGENT_PAYMASTER_ADDRESS,
-  };
-}
-
-async function waitForUserOperationReceipt(hash, timeout = 120_000) {
-  return bundlerClient.waitForUserOperationReceipt({ hash, timeout });
-}
+const bundlerTransport = http(BUNDLER_URL);
 
 async function getBundlerGasPrice() {
   const fees = await publicClient.estimateFeesPerGas();
+  const floor = 1_000_000_000n; // 1 gwei floor
   return {
-    maxFeePerGas: fees.maxFeePerGas,
-    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+    maxFeePerGas: fees.maxFeePerGas > floor ? fees.maxFeePerGas : floor,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas > floor ? fees.maxPriorityFeePerGas : floor,
   };
 }
 
-async function getDirectEthFallbackGasPrice() {
-  const fees = await getBundlerGasPrice();
-  const minBundlerGasPrice = 1_000_000_000n; // 1 gwei floor for Particle bundler direct ETH mode
-  return {
-    maxFeePerGas: fees.maxFeePerGas > minBundlerGasPrice ? fees.maxFeePerGas : minBundlerGasPrice,
-    maxPriorityFeePerGas:
-      fees.maxPriorityFeePerGas > minBundlerGasPrice ? fees.maxPriorityFeePerGas : minBundlerGasPrice,
-  };
+async function getEip7702Authorization(signer) {
+  const code = await publicClient.getCode({ address: signer.address });
+  const isDelegated = code && code !== "0x" && code.startsWith("0xef0100");
+  if (isDelegated) return null;
+
+  console.log("> Signing EIP-7702 authorization (first-time delegation)...");
+  const walletClient = createWalletClient({ account: signer, chain: CHAIN, transport: http(RPC_URL) });
+  return signAuthorization(walletClient, { contractAddress: SIMPLE_7702_IMPLEMENTATION });
 }
 
 // ======================= WALLET & ACCOUNT =======================
@@ -212,11 +129,23 @@ function getWalletInstance() {
 }
 
 async function getSmartAccount(signer) {
-  return await signerToSimpleSmartAccount(publicClient, {
-    entryPoint: ENTRY_POINT_ADDRESS,
-    signer: signer,
-    factoryAddress: SMART_ACCOUNT_FACTORY_ADDRESS,
+  const smartAccount = await toSimple7702SmartAccount({
+    client: publicClient,
+    owner: signer,
+    implementation: SIMPLE_7702_IMPLEMENTATION,
+    entryPoint: "0.9",
   });
+
+  const client = createBundlerClient({
+    account: smartAccount,
+    client: publicClient,
+    transport: bundlerTransport,
+    userOperation: {
+      estimateFeesPerGas: getBundlerGasPrice,
+    },
+  });
+
+  return { smartAccount, bundlerClient: client };
 }
 
 // ======================= HELPERS =======================
@@ -286,16 +215,6 @@ function isFreeMineOperation(calls) {
   return calls.length > 0 && calls.every(isFreeMineCall);
 }
 
-function getRequiredPrefundForUserOperation(userOperation, hasPaymaster = false) {
-  const callGasLimit = BigInt(userOperation.callGasLimit ?? 0n);
-  const verificationGasLimit = BigInt(userOperation.verificationGasLimit ?? 0n);
-  const preVerificationGas = BigInt(userOperation.preVerificationGas ?? 0n);
-  const maxFeePerGas = BigInt(userOperation.maxFeePerGas ?? 0n);
-  const verificationMultiplier = hasPaymaster ? 3n : 1n;
-
-  return (callGasLimit + verificationGasLimit * verificationMultiplier + preVerificationGas) * maxFeePerGas;
-}
-
 function getOperationRequiredEth(calls) {
   const callList = Array.isArray(calls) ? calls : [calls];
   return callList.reduce((sum, call) => sum + BigInt(call?.value ?? 0n), 0n);
@@ -303,27 +222,6 @@ function getOperationRequiredEth(calls) {
 
 function maxBigInt(...values) {
   return values.reduce((max, value) => (value > max ? value : max), 0n);
-}
-
-async function getPaymasterUserOperationEstimateOrThrow(callData, ethSmartAccountClient) {
-  const gasPrices = await getBundlerGasPrice();
-  const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
-    userOperation: { callData },
-  });
-
-  try {
-    return await getSponsoredUserOperationEstimate(ethUserOperation, gasPrices);
-  } catch (error) {
-    throw new Error(
-      `CLI_PAYMASTER_ESTIMATE_FAILED|reason=${sanitizeCliField(getNormalizedErrorMessage(error).slice(0, 200))}`,
-    );
-  }
-}
-
-async function getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient) {
-  const estimate = await getPaymasterUserOperationEstimateOrThrow(callData, ethSmartAccountClient);
-  const estimatedAgcPrecharge = await estimateAgcPrechargeFromPaymasterEstimate(estimate);
-  return { estimate, estimatedAgcPrecharge };
 }
 
 async function estimateAgcPrechargeFromRequiredEth(requiredEthPrefund) {
@@ -346,11 +244,6 @@ async function estimateAgcPrechargeFromRequiredEth(requiredEthPrefund) {
   }
 
   return maxBigInt(helperQuote, reserveQuote, spotQuote);
-}
-
-async function estimateAgcPrechargeFromPaymasterEstimate(paymasterEstimate) {
-  const requiredEthPrefund = getRequiredPrefundForUserOperation(paymasterEstimate, true);
-  return estimateAgcPrechargeFromRequiredEth((requiredEthPrefund * 31n) / 10n);
 }
 
 async function getAgcQuoteFromReserves(requiredEthPrefund) {
@@ -407,16 +300,11 @@ function loadEnvConfig() {
 
 // ======================= USER OPERATION =======================
 
-async function runUserOp(account, calls, description) {
+async function runUserOp(signer, smartAccount, bundlerClient, calls, description) {
   let gasPaymentMode = "agc";
   const expectsFreeMine = isFreeMineOperation(calls);
   let canUseFreeMine = false;
-  let preferredGasMode = "agc";
-  let ethBalance;
-  let agcBalance;
-  let estimatedDirectEthCost = null;
-  let paymasterEstimateSucceeded = false;
-  let estimatedAgcPrecharge = null;
+  const accountAddress = signer.address; // EIP-7702: EOA = Smart Account
 
   if (expectsFreeMine) {
     try {
@@ -424,7 +312,7 @@ async function runUserOp(account, calls, description) {
         address: AGENT_PAYMASTER_ADDRESS,
         abi: AGENT_PAYMASTER_ABI,
         functionName: "hasFreeMined",
-        args: [account.address],
+        args: [accountAddress],
       });
       canUseFreeMine = !hasFreeMined;
     } catch {
@@ -432,169 +320,81 @@ async function runUserOp(account, calls, description) {
     }
   }
 
-  const smartAccountClient = createSmartAccountClient({
-    account,
-    entryPoint: ENTRY_POINT_ADDRESS,
-    chain: CHAIN,
-    bundlerTransport,
-    middleware: {
-      sponsorUserOperation: async ({ userOperation }) => {
-        console.log(`> Estimating gas and attaching custom paymaster (${description})...`);
-        const fallbackGasPrices = await getBundlerGasPrice();
-
-        try {
-          const estimate = await getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices);
-          gasPaymentMode = canUseFreeMine ? "free" : "agc";
-
-          return {
-            ...estimate,
-            verificationGasLimit:
-              BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
-          };
-        } catch (paymasterError) {
-          const paymasterErrorMessage = [
-            paymasterError?.message,
-            paymasterError?.cause?.message,
-            typeof paymasterError?.extraData === "string" ? paymasterError.extraData : null,
-          ]
-            .filter(Boolean)
-            .join(" | ");
-          console.log(`> ⚠️  Paymaster estimation/attachment failed: ${paymasterErrorMessage.slice(0, 160)}`);
-          throw paymasterError;
-        }
-      },
-    },
-  });
-
-  const encodedCalls = Array.isArray(calls) && calls.length === 1 ? calls[0] : calls;
-
-  const ethSmartAccountClient = createSmartAccountClient({
-    account,
-    entryPoint: ENTRY_POINT_ADDRESS,
-    chain: CHAIN,
-    bundlerTransport,
-    middleware: {
-      gasPrice: getDirectEthFallbackGasPrice,
-    },
-  });
-
   console.log(`> Packaging UserOperation for ${description}...`);
   try {
-    const callData = await account.encodeCallData(encodedCalls);
-    let userOpHash;
-    // After removing DeFi operations, only mine/claim calls go through runUserOp.
-    // Neither targets Likwid contracts, so operation-required AGC is always 0.
-    const operationRequiredAgc = 0n;
     const operationRequiredEth = getOperationRequiredEth(calls);
+    const callList = Array.isArray(calls) ? calls : [calls];
 
-    try {
-      const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
-        userOperation: { callData },
-      });
-      estimatedDirectEthCost = getRequiredPrefundForUserOperation(ethUserOperation);
-    } catch (ethEstimateError) {
-      console.log(
-        `> ⚠️  Direct ETH gas estimation failed: ${getNormalizedErrorMessage(ethEstimateError).slice(0, 160)}`,
-      );
-    }
-
-    [ethBalance, agcBalance] = await Promise.all([
-      publicClient.getBalance({ address: account.address }),
+    const [ethBalance, agcBalance] = await Promise.all([
+      publicClient.getBalance({ address: accountAddress }),
       publicClient.readContract({
         address: AGC_TOKEN_ADDRESS,
         abi: ERC20_ABI,
         functionName: "balanceOf",
-        args: [account.address],
+        args: [accountAddress],
       }),
     ]);
 
-    const totalRequiredEthForDirect =
-      estimatedDirectEthCost === null ? null : estimatedDirectEthCost + operationRequiredEth;
-    const hasEnoughEthForDirectGas = totalRequiredEthForDirect !== null && ethBalance >= totalRequiredEthForDirect;
-    const hasEnoughAgcForOperation = agcBalance >= operationRequiredAgc;
+    // Check EIP-7702 authorization
+    const authorization = await getEip7702Authorization(signer);
+    const userOpOptions = authorization ? { authorization } : {};
 
-    if (!hasEnoughAgcForOperation) {
-      const shortfallAgc = operationRequiredAgc - agcBalance;
-      throw new Error(
-        [
-          "CLI_INSUFFICIENT_OPERATION_AGC",
-          `required=${formatTokenAmount(operationRequiredAgc)}`,
-          `available=${formatTokenAmount(agcBalance)}`,
-          `op_shortfall=${formatTokenAmount(shortfallAgc)}`,
-        ].join("|"),
-      );
-    }
-
-    if (hasEnoughEthForDirectGas) {
-      preferredGasMode = "eth";
-    } else if (canUseFreeMine) {
-      preferredGasMode = "agc";
+    // Determine gas payment mode: free mine > ETH direct > AGC paymaster
+    let usePaymaster = true;
+    if (canUseFreeMine) {
+      gasPaymentMode = "free";
+    } else if (ethBalance > operationRequiredEth + parseEther("0.001")) {
+      gasPaymentMode = "eth";
+      usePaymaster = false;
     } else {
-      const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient);
-      estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
-      const totalRequiredAgc = operationRequiredAgc + estimatedAgcPrecharge;
-
-      if (agcBalance < totalRequiredAgc) {
+      // Check AGC balance for paymaster precharge
+      const estimatedAgcPrecharge = await estimateAgcPrechargeFromRequiredEth(parseEther("0.005"));
+      if (agcBalance < estimatedAgcPrecharge) {
         throw new Error(
           [
             "CLI_INSUFFICIENT_TOTAL_AGC",
-            `operation=${formatTokenAmount(operationRequiredAgc)}`,
+            `operation=0.000000`,
             `precharge=${formatTokenAmount(estimatedAgcPrecharge)}`,
-            `required=${formatTokenAmount(totalRequiredAgc)}`,
+            `required=${formatTokenAmount(estimatedAgcPrecharge)}`,
             `available=${formatTokenAmount(agcBalance)}`,
-            `shortfall=${formatTokenAmount(totalRequiredAgc - agcBalance)}`,
+            `shortfall=${formatTokenAmount(estimatedAgcPrecharge - agcBalance)}`,
           ].join("|"),
         );
       }
-      preferredGasMode = "agc";
-      paymasterEstimateSucceeded = true;
+      gasPaymentMode = "agc";
     }
 
-    const submitWithEth = async () => {
-      gasPaymentMode = "eth";
-      const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
-        userOperation: { callData },
-      });
-      ethUserOperation.signature = await account.signUserOperation(ethUserOperation);
-      return bundlerRequest("eth_sendUserOperation", [ethUserOperation, ENTRY_POINT_ADDRESS]);
+    console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
+    console.log(`> Smart account AGC balance: ${Number(agcBalance) / 1e18} AGC`);
+
+    const sendArgs = {
+      calls: callList,
+      ...userOpOptions,
     };
 
-    const submitWithPaymaster = async () =>
-      smartAccountClient.sendUserOperation({
-        userOperation: { callData },
-      });
-
-    if (preferredGasMode === "eth") {
-      console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
-      if (estimatedDirectEthCost !== null) {
-        console.log(`> Estimated direct ETH gas required: ${Number(estimatedDirectEthCost) / 1e18} ETH`);
-      }
-      if (operationRequiredEth > 0n) {
-        console.log(`> ETH required by operation: ${Number(operationRequiredEth) / 1e18} ETH`);
-      }
-      console.log("> Using direct ETH gas payment...");
-      userOpHash = await submitWithEth();
-    } else {
-      console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
-      console.log(`> Smart account AGC balance: ${Number(agcBalance) / 1e18} AGC`);
-      if (!canUseFreeMine) {
-        console.log(`> Required AGC for operation: ${Number(operationRequiredAgc) / 1e18} AGC`);
-        if (!paymasterEstimateSucceeded) {
-          console.log("> Checking paymaster estimate...");
-          const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient);
-          estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
-          paymasterEstimateSucceeded = true;
-        }
-        console.log(`> Estimated AGC precharge: ${Number(estimatedAgcPrecharge) / 1e18} AGC`);
-      }
-      console.log("> Using AGC / paymaster gas payment...");
-      userOpHash = await submitWithPaymaster();
+    if (usePaymaster) {
+      const paymasterStub = {
+        paymaster: AGENT_PAYMASTER_ADDRESS,
+        paymasterData: "0x",
+        paymasterVerificationGasLimit: 600000n,
+        paymasterPostOpGasLimit: 600000n,
+      };
+      sendArgs.paymaster = {
+        getPaymasterStubData: async () => paymasterStub,
+        getPaymasterData: async () => paymasterStub,
+      };
     }
 
+    console.log(
+      `> Using ${gasPaymentMode === "free" ? "free mine (paymaster)" : gasPaymentMode === "eth" ? "direct ETH" : "AGC / paymaster"} gas payment...`,
+    );
+
+    const userOpHash = await bundlerClient.sendUserOperation(sendArgs);
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
     console.log("> Waiting for receipt...");
-    const receipt = await waitForUserOperationReceipt(userOpHash, 120_000);
-    if (receipt.success !== true || receipt.receipt?.status !== "success") {
+
+    const receipt = await bundlerClient.waitForUserOperationReceipt({ hash: userOpHash, timeout: 120_000 });
+    if (!receipt.success) {
       throw new Error(
         [
           "CLI_USEROP_REVERTED",
@@ -615,23 +415,6 @@ async function runUserOp(account, calls, description) {
     return receipt;
   } catch (e) {
     const errMsg = e.message || String(e);
-    if (errMsg.startsWith("CLI_INSUFFICIENT_OPERATION_AGC|")) {
-      const fields = parseCliErrorFields(errMsg);
-      console.log(`> ❌ ${description} aborted.`);
-      console.log(`> AGC for operation is insufficient.`);
-      console.log(`> Required:  ${fields.required} AGC`);
-      console.log(`> Available: ${fields.available} AGC`);
-      console.log(`> Operation shortfall: ${fields.op_shortfall} AGC`);
-      return null;
-    }
-    if (errMsg.startsWith("CLI_PAYMASTER_ESTIMATE_FAILED|")) {
-      const fields = parseCliErrorFields(errMsg);
-      console.log(`> ❌ ${description} aborted.`);
-      console.log(`> Paymaster estimate failed.`);
-      console.log(`> This transaction cannot proceed with AGC gas sponsorship right now.`);
-      console.log(`> Detail: ${fields.reason}`);
-      return null;
-    }
     if (errMsg.startsWith("CLI_INSUFFICIENT_TOTAL_AGC|")) {
       const fields = parseCliErrorFields(errMsg);
       console.log(`> ❌ ${description} aborted.`);
@@ -676,29 +459,19 @@ const { MODEL_TYPE, MODEL_KEY } = loadEnvConfig();
 async function check_wallet() {
   const signer = getWalletInstance();
   if (signer) {
-    const account = await getSmartAccount(signer);
+    // EIP-7702: EOA and Smart Account share the same address
+    const address = signer.address;
 
-    let ethBalEOA = 0n,
-      ethBalSA = 0n,
-      agcBalEOA = 0n,
-      agcBalSA = 0n;
+    let ethBal = 0n,
+      agcBal = 0n;
     try {
-      [ethBalEOA, ethBalSA] = await Promise.all([
-        publicClient.getBalance({ address: signer.address }),
-        publicClient.getBalance({ address: account.address }),
-      ]);
-      [agcBalEOA, agcBalSA] = await Promise.all([
+      [ethBal, agcBal] = await Promise.all([
+        publicClient.getBalance({ address }),
         publicClient.readContract({
           address: AGC_TOKEN_ADDRESS,
           abi: ERC20_ABI,
           functionName: "balanceOf",
-          args: [signer.address],
-        }),
-        publicClient.readContract({
-          address: AGC_TOKEN_ADDRESS,
-          abi: ERC20_ABI,
-          functionName: "balanceOf",
-          args: [account.address],
+          args: [address],
         }),
       ]);
     } catch (e) {
@@ -708,15 +481,10 @@ async function check_wallet() {
     console.log(`> 🔑 Wallet Status: Found`);
     console.log(`> 🔗 Network: ${NETWORK_NAME} (Chain ID ${CHAIN_ID})`);
     console.log(`>`);
-    console.log(`> 🔐 Smart Account (ERC-4337):`);
-    console.log(`> Address: ${account.address}`);
-    console.log(`> ETH Balance: ${(Number(ethBalSA) / 1e18).toFixed(6)} ETH`);
-    console.log(`> AGC Balance: ${(Number(agcBalSA) / 1e18).toFixed(6)} AGC`);
-    console.log(`>`);
-    console.log(`> 🔑 EOA Signer:`);
-    console.log(`> Address: ${signer.address}`);
-    console.log(`> ETH Balance: ${(Number(ethBalEOA) / 1e18).toFixed(6)} ETH`);
-    console.log(`> AGC Balance: ${(Number(agcBalEOA) / 1e18).toFixed(6)} AGC`);
+    console.log(`> 🔐 Smart Account (EIP-7702, same as EOA):`);
+    console.log(`> Address: ${address}`);
+    console.log(`> ETH Balance: ${(Number(ethBal) / 1e18).toFixed(6)} ETH`);
+    console.log(`> AGC Balance: ${(Number(agcBal) / 1e18).toFixed(6)} AGC`);
     console.log(`>`);
     console.log(`> 📁 Stored at: ${WALLET_FILE}`);
   } else {
@@ -750,10 +518,8 @@ async function get_smart_account() {
   const signer = getWalletInstance();
   if (!signer) return formatError("No EOA wallet found. Run create_wallet first.");
 
-  const account = await getSmartAccount(signer);
-  console.log(`> 🔐 My Smart Account (ERC-4337):`);
-  console.log(`> ${account.address}`);
-  console.log(`> 🔑 My EOA Signer:`);
+  // EIP-7702: EOA and Smart Account share the same address
+  console.log(`> 🔐 Smart Account (EIP-7702, same as EOA):`);
   console.log(`> ${signer.address}`);
 }
 
@@ -762,9 +528,9 @@ async function get_smart_account() {
 async function status() {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found. Run create_wallet first.");
-  const account = await getSmartAccount(signer);
+  const address = signer.address;
 
-  const ethBal = await publicClient.getBalance({ address: account.address });
+  const ethBal = await publicClient.getBalance({ address });
   let agcBal = 0n,
     cooldownSec = 0n,
     vest = null;
@@ -774,13 +540,13 @@ async function status() {
       address: AGC_TOKEN_ADDRESS,
       abi: parseAbi(["function balanceOf(address) view returns (uint256)"]),
       functionName: "balanceOf",
-      args: [account.address],
+      args: [address],
     });
     cooldownSec = await publicClient.readContract({
       address: AGC_TOKEN_ADDRESS,
       abi: parseAbi(["function getTimeUntilCanMine(address) view returns (uint256)"]),
       functionName: "getTimeUntilCanMine",
-      args: [account.address],
+      args: [address],
     });
     const v = await publicClient.readContract({
       address: AGC_TOKEN_ADDRESS,
@@ -788,7 +554,7 @@ async function status() {
         "function vestingSchedules(address) view returns (uint256 totalLocked, uint256 released, uint256 startTime, uint256 endTime, uint256 lpTokenId)",
       ]),
       functionName: "vestingSchedules",
-      args: [account.address],
+      args: [address],
     });
     if (v[0] > 0n) {
       vest = {
@@ -806,7 +572,7 @@ async function status() {
 
   console.log(`> 📊 Account Status`);
   console.log(`> Network: ${NETWORK_NAME} (Chain ID ${CHAIN_ID})`);
-  console.log(`> Address: ${account.address}`);
+  console.log(`> Address: ${address}`);
   console.log(`> ETH Balance: ${(Number(ethBal) / 1e18).toFixed(6)} ETH`);
   console.log(`> AGC Balance: ${(Number(agcBal) / 1e18).toFixed(6)} AGC`);
   console.log(`>`);
@@ -825,9 +591,8 @@ async function status() {
 async function challenge() {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
-  const account = await getSmartAccount(signer);
   try {
-    const res = await axios.get(`${VERIFIER_URL}/challenge?address=${account.address}`);
+    const res = await axios.get(`${VERIFIER_URL}/challenge?address=${signer.address}`);
     const d = res.data;
     console.log(`> 🧩 Challenge Received`);
     if (d.intro) console.log(`> Intro: ${d.intro}`);
@@ -900,13 +665,12 @@ async function verify(answer, constraints) {
   if (!answer || !constraints) return formatError("Usage: verify <answer> <constraints>");
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
-  const account = await getSmartAccount(signer);
 
   const { reclaimProofStr, modelTypeStr } = await reclaim_bill();
 
   try {
     const payload = {
-      wallet_address: account.address,
+      wallet_address: signer.address,
       answer_text: answer,
       constraints: constraints,
     };
@@ -936,7 +700,6 @@ async function verify(answer, constraints) {
 async function cost(score) {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found. Run create_wallet first.");
-  const account = await getSmartAccount(signer);
   const scoreVal = BigInt(score || 1);
 
   try {
@@ -960,7 +723,7 @@ async function cost(score) {
     let ethCost = 0n;
     if (r1 > 0n) ethCost = (liquidPart * r0 * 110n) / (r1 * 100n); // Add 10% slippage
 
-    const ethBalance = await publicClient.getBalance({ address: account.address });
+    const ethBalance = await publicClient.getBalance({ address: signer.address });
     const deficit = ethCost > ethBalance ? ethCost - ethBalance : 0n;
 
     console.log(`> 💰 Mining Cost Estimate (score=${scoreVal})`);
@@ -973,7 +736,7 @@ async function cost(score) {
     console.log(`>`);
     console.log(`> 💎 ETH Required for LP: ${(Number(ethCost) / 1e18).toFixed(6)} ETH`);
     console.log(`>`);
-    console.log(`> 🏦 Smart Account: ${account.address}`);
+    console.log(`> 🏦 Smart Account: ${signer.address}`);
     console.log(`> 💳 Current ETH Balance: ${(Number(ethBalance) / 1e18).toFixed(6)} ETH`);
     if (deficit > 0n) {
       console.log(
@@ -990,13 +753,12 @@ async function cost(score) {
 async function cooldown() {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
-  const account = await getSmartAccount(signer);
   try {
     const time = await publicClient.readContract({
       address: AGC_TOKEN_ADDRESS,
       abi: parseAbi(["function getTimeUntilCanMine(address) view returns (uint256)"]),
       functionName: "getTimeUntilCanMine",
-      args: [account.address],
+      args: [signer.address],
     });
     if (time === 0n) {
       console.log(`> ✅ Cooldown complete — ready to mine!`);
@@ -1026,7 +788,7 @@ async function reward(score) {
 async function claimVested() {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
-  const account = await getSmartAccount(signer);
+  const { smartAccount, bundlerClient } = await getSmartAccount(signer);
   const call = {
     to: AGC_TOKEN_ADDRESS,
     value: 0n,
@@ -1035,19 +797,18 @@ async function claimVested() {
       functionName: "claimVested",
     }),
   };
-  await runUserOp(account, call, "Claim Vested AGC");
+  await runUserOp(signer, smartAccount, bundlerClient, call, "Claim Vested AGC");
 }
 
 async function claimable() {
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
-  const account = await getSmartAccount(signer);
   try {
     const amt = await publicClient.readContract({
       address: AGC_TOKEN_ADDRESS,
       abi: parseAbi(["function getClaimableVested(address) view returns (uint256)"]),
       functionName: "getClaimableVested",
-      args: [account.address],
+      args: [signer.address],
     });
     console.log(`> 🔓 Claimable Vested: ${(Number(amt) / 1e18).toFixed(6)} AGC`);
   } catch (e) {
@@ -1061,7 +822,7 @@ async function mine(scoreStr, signature, nonceStr, ethAmountStr) {
   }
   const signer = getWalletInstance();
   if (!signer) return formatError("No wallet found.");
-  const account = await getSmartAccount(signer);
+  const { smartAccount, bundlerClient } = await getSmartAccount(signer);
 
   const score = BigInt(scoreStr);
   const nonce = BigInt(nonceStr);
@@ -1081,7 +842,7 @@ async function mine(scoreStr, signature, nonceStr, ethAmountStr) {
     }),
   };
 
-  await runUserOp(account, mineCall, "Mine AGC");
+  await runUserOp(signer, smartAccount, bundlerClient, mineCall, "Mine AGC");
 }
 
 // ======================= CLI ROUTER =======================
