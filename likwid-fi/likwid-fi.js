@@ -193,6 +193,36 @@ function createClients(config, networkConfig) {
   return { publicClient, walletClient, account, chain };
 }
 
+async function resolveContext() {
+  const config = loadConfig();
+  if (!config) { console.log(`> ERROR: Not configured. Run setup first.`); return null; }
+
+  const netConfig = loadNetworkConfig(config.network);
+  if (!netConfig) return null;
+
+  const privateKey = readPrivateKey(config.keyFilePath);
+  if (!privateKey) return null;
+
+  const eoaAccount = privateKeyToAccount(privateKey);
+  const chain = CHAINS[config.network];
+  const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
+
+  let senderAddress;
+  if (config.accountType === "smart") {
+    try {
+      const { smartAccount } = await getSmartAccount(config, netConfig, eoaAccount);
+      senderAddress = smartAccount.address;
+    } catch (e) {
+      console.log(`> ERROR: Could not resolve Smart Account: ${e.message}`);
+      return null;
+    }
+  } else {
+    senderAddress = eoaAccount.address;
+  }
+
+  return { config, netConfig, eoaAccount, publicClient, senderAddress };
+}
+
 async function getSmartAccount(config, networkConfig, eoaAccount) {
   const { toSimpleSmartAccount } = require("permissionless/accounts");
   const { entryPoint06Address } = require("viem/account-abstraction");
@@ -490,11 +520,9 @@ async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
     return;
   }
 
-  const config = loadConfig();
-  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-
-  const netConfig = loadNetworkConfig(config.network);
-  if (!netConfig) return;
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
 
   const poolIndex = parseInt(poolIndexStr);
   const pool = netConfig.pools[poolIndex];
@@ -509,26 +537,6 @@ async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
 
   const pairPositionABI = loadABI("LikwidPairPosition");
   const helperABI = loadABI("LikwidHelper");
-
-  // --- Resolve execution context ---
-  const privateKey = readPrivateKey(config.keyFilePath);
-  if (!privateKey) return;
-  const eoaAccount = privateKeyToAccount(privateKey);
-
-  const chain = CHAINS[config.network];
-  const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
-
-  let senderAddress;
-  if (config.accountType === "smart") {
-    try {
-      const { smartAccount } = await getSmartAccount(config, netConfig, eoaAccount);
-      senderAddress = smartAccount.address;
-    } catch (e) {
-      return console.log(`> ERROR: Could not resolve Smart Account: ${e.message}`);
-    }
-  } else {
-    senderAddress = eoaAccount.address;
-  }
 
   // --- Quote ---
   console.log(`> SWAP: ${amountStr} ${fromToken.symbol} -> ${toToken.symbol}`);
@@ -649,11 +657,9 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
     return;
   }
 
-  const config = loadConfig();
-  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-
-  const netConfig = loadNetworkConfig(config.network);
-  if (!netConfig) return;
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
 
   const poolIndex = parseInt(poolIndexStr);
   const pool = netConfig.pools[poolIndex];
@@ -671,25 +677,6 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
 
   const helperABI = loadABI("LikwidHelper");
   const pairPositionABI = loadABI("LikwidPairPosition");
-
-  // --- Resolve sender ---
-  const privateKey = readPrivateKey(config.keyFilePath);
-  if (!privateKey) return;
-  const eoaAccount = privateKeyToAccount(privateKey);
-  const chain = CHAINS[config.network];
-  const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
-
-  let senderAddress;
-  if (config.accountType === "smart") {
-    try {
-      const { smartAccount } = await getSmartAccount(config, netConfig, eoaAccount);
-      senderAddress = smartAccount.address;
-    } catch (e) {
-      return console.log(`> ERROR: Could not resolve Smart Account: ${e.message}`);
-    }
-  } else {
-    senderAddress = eoaAccount.address;
-  }
 
   // --- Query pool state ---
   let r0, r1;
@@ -827,18 +814,9 @@ async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
     return;
   }
 
-  const config = loadConfig();
-  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-
-  const netConfig = loadNetworkConfig(config.network);
-  if (!netConfig) return;
-
-  // --- Resolve sender (need publicClient for token lookup) ---
-  const privateKey = readPrivateKey(config.keyFilePath);
-  if (!privateKey) return;
-  const eoaAccount = privateKeyToAccount(privateKey);
-  const chain = CHAINS[config.network];
-  const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, eoaAccount, publicClient } = ctx;
 
   // --- Resolve tokens (by name or address) ---
   const tokenA = await resolveTokenOrAddress(netConfig, token0Name, publicClient);
