@@ -16,9 +16,7 @@
 const {
   createPublicClient,
   createWalletClient,
-  custom,
   http,
-  toHex,
   parseUnits,
   formatUnits,
   encodeFunctionData,
@@ -27,6 +25,7 @@ const {
   parseAbi,
   getAddress,
 } = require("viem");
+const { signAuthorization } = require("viem/actions");
 const { sepolia, mainnet, base } = require("viem/chains");
 const { privateKeyToAccount } = require("viem/accounts");
 const fs = require("fs");
@@ -138,43 +137,9 @@ function resolveRpc(config, networkConfig) {
 
 // ======================= BUNDLER HELPERS =======================
 
-function serializeRpcValue(value) {
-  if (typeof value === "bigint") return toHex(value);
-  if (Array.isArray(value)) return value.map(serializeRpcValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, serializeRpcValue(nested)]));
-  }
-  return value;
-}
-
-let bundlerRequestId = 0;
-
-function createBundlerTransport(bundlerUrl, chainId) {
-  return custom({
-    request: async ({ method, params }) => {
-      const response = await fetch(bundlerUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: ++bundlerRequestId,
-          chainId,
-          method,
-          params: serializeRpcValue(params),
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload?.error?.message || response.statusText);
-      }
-      if (payload.error) {
-        const error = new Error(payload.error.message || "Bundler request failed");
-        error.code = payload.error.code;
-        throw error;
-      }
-      return payload.result;
-    },
-  });
+function resolveBundlerTransport(networkConfig) {
+  const url = process.env.BUNDLER_URL || networkConfig.bundlerUrl;
+  return http(url);
 }
 
 // ======================= CLIENT SETUP =======================
@@ -207,42 +172,27 @@ async function resolveContext() {
   const chain = CHAINS[config.network];
   const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
 
-  let senderAddress;
-  if (config.accountType === "smart") {
-    try {
-      const { smartAccount } = await getSmartAccount(config, netConfig, eoaAccount);
-      senderAddress = smartAccount.address;
-    } catch (e) {
-      console.log(`> ERROR: Could not resolve Smart Account: ${e.message}`);
-      return null;
-    }
-  } else {
-    senderAddress = eoaAccount.address;
-  }
+  // With EIP-7702, EOA and Smart Account share the same address
+  const senderAddress = eoaAccount.address;
 
   return { config, netConfig, eoaAccount, publicClient, senderAddress };
 }
 
 async function getSmartAccount(config, networkConfig, eoaAccount) {
-  const { toSimpleSmartAccount } = require("permissionless/accounts");
-  const { entryPoint06Address } = require("viem/account-abstraction");
-  const { createBundlerClient } = require("viem/account-abstraction");
+  const { toSimple7702SmartAccount, createBundlerClient } = require("viem/account-abstraction");
 
   const chain = CHAINS[config.network];
   const transport = resolveRpc(config, networkConfig);
-  const bundlerUrl = process.env.BUNDLER_URL || networkConfig.bundlerUrl;
-  const factoryAddress = networkConfig.smartAccountFactory;
-
   const publicClient = createPublicClient({ chain, transport });
 
-  const smartAccount = await toSimpleSmartAccount({
+  const smartAccount = await toSimple7702SmartAccount({
     client: publicClient,
     owner: eoaAccount,
-    factoryAddress,
-    entryPoint: { address: entryPoint06Address, version: "0.6" },
+    implementation: networkConfig.simple7702Implementation,
+    entryPoint: "0.8",
   });
 
-  const bundlerTransport = createBundlerTransport(bundlerUrl, chain.id);
+  const bundlerTransport = resolveBundlerTransport(networkConfig);
 
   const bundlerClient = createBundlerClient({
     account: smartAccount,
@@ -251,7 +201,7 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
     userOperation: {
       estimateFeesPerGas: async () => {
         const fees = await publicClient.estimateFeesPerGas();
-        const floor = 1_000_000_000n; // 1 gwei floor for Particle bundler
+        const floor = 1_000_000_000n;
         return {
           maxFeePerGas: fees.maxFeePerGas > floor ? fees.maxFeePerGas : floor,
           maxPriorityFeePerGas: fees.maxPriorityFeePerGas > floor ? fees.maxPriorityFeePerGas : floor,
@@ -265,25 +215,36 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
 
 // ======================= SHARED EXECUTION =======================
 
-async function buildApprovalCall(publicClient, owner, tokenAddress, tokenSymbol, spender, amount) {
+async function buildApprovalCalls(publicClient, owner, tokenAddress, tokenSymbol, spender, amount) {
   const currentAllowance = await publicClient.readContract({
     address: tokenAddress, abi: ERC20_ABI, functionName: "allowance",
     args: [owner, spender],
   });
-  if (currentAllowance >= amount) return null;
+  if (currentAllowance >= amount) return [];
   console.log(`> Approving ${tokenSymbol}...`);
-  return {
-    to: tokenAddress, value: 0n,
+  const calls = [];
+  // Non-standard ERC-20 tokens (e.g. USDT) revert on approve(newAmount) when
+  // current allowance > 0. Reset to 0 first to handle this safely.
+  if (currentAllowance > 0n) {
+    calls.push({
+      to: tokenAddress, value: 0n, _isApproval: true,
+      data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [spender, 0n] }),
+    });
+  }
+  calls.push({
+    to: tokenAddress, value: 0n, _isApproval: true,
     data: encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [spender, amount] }),
-  };
+  });
+  return calls;
 }
 
-async function submitUserOp(bundlerClient, calls) {
-  const hash = await bundlerClient.sendUserOperation({ calls });
+async function submitUserOp(bundlerClient, calls, options = {}) {
+  const sendArgs = { calls, ...options };
+  const hash = await bundlerClient.sendUserOperation(sendArgs);
   console.log(`> UserOp submitted: ${hash}`);
   console.log(`> Waiting for receipt...`);
   const receipt = await bundlerClient.waitForUserOperationReceipt({ hash, timeout: 120_000 });
-  if (receipt.success && receipt.receipt?.status === "success") {
+  if (receipt.success) {
     console.log(`> TX_OK`);
     console.log(`> Transaction: ${receipt.receipt.transactionHash}`);
     console.log(`> Block: ${receipt.receipt.blockNumber}`);
@@ -297,33 +258,46 @@ async function submitUserOp(bundlerClient, calls) {
   }
 }
 
+async function getEip7702Authorization(publicClient, walletClient, netConfig) {
+  const code = await publicClient.getCode({ address: walletClient.account.address });
+  const isDelegated = code && code !== "0x" && code.startsWith("0xef0100");
+  if (isDelegated) return null;
+
+  console.log(`> Signing EIP-7702 authorization (first-time delegation)...`);
+  return signAuthorization(walletClient, {
+    contractAddress: netConfig.simple7702Implementation,
+  });
+}
+
 async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) {
   if (config.accountType === "smart") {
     const { bundlerClient } = await getSmartAccount(config, netConfig, eoaAccount);
 
-    // Split calls: if batch contains ETH-value calls mixed with zero-value calls,
-    // run zero-value calls (approvals) first, then the value call separately.
-    // SimpleAccount v0.6 executeBatch() does NOT forward msg.value per call.
-    const hasValueCall = calls.some(c => c.value > 0n);
-    const needsSplit = calls.length > 1 && hasValueCall;
+    // Sign EIP-7702 authorization if EOA hasn't been delegated yet
+    const chain = CHAINS[config.network];
+    const walletClient = createWalletClient({
+      account: eoaAccount, chain,
+      transport: resolveRpc(config, netConfig),
+    });
+    const authorization = await getEip7702Authorization(publicClient, walletClient, netConfig);
+    const userOpOptions = authorization ? { authorization } : {};
+
+    // Non-standard ERC-20 tokens (e.g. USDT) can fail when approve + swap are
+    // batched in a single executeBatch. Split approvals into a separate UserOp.
+    const approvalCalls = calls.filter(c => c._isApproval);
+    const actionCalls = calls.filter(c => !c._isApproval);
 
     try {
-      if (needsSplit) {
-        const zeroCalls = calls.filter(c => !c.value || c.value === 0n);
-        const valueCalls = calls.filter(c => c.value > 0n);
-        if (zeroCalls.length > 0) {
-          console.log(`> Submitting approvals (${zeroCalls.length} call${zeroCalls.length > 1 ? "s" : ""})...`);
-          const ok = await submitUserOp(bundlerClient, zeroCalls);
-          if (!ok) return false;
-        }
-        for (const vc of valueCalls) {
-          console.log(`> Submitting value-carrying call...`);
-          const ok = await submitUserOp(bundlerClient, [vc]);
-          if (!ok) return false;
-        }
+      if (approvalCalls.length > 0 && actionCalls.length > 0) {
+        console.log(`> Submitting approvals (${approvalCalls.length} call${approvalCalls.length > 1 ? "s" : ""})...`);
+        const ok = await submitUserOp(bundlerClient, approvalCalls, userOpOptions);
+        if (!ok) return false;
+        console.log(`> Submitting action (${actionCalls.length} call${actionCalls.length > 1 ? "s" : ""})...`);
+        const ok2 = await submitUserOp(bundlerClient, actionCalls);
+        if (!ok2) return false;
       } else {
         console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
-        const ok = await submitUserOp(bundlerClient, calls);
+        const ok = await submitUserOp(bundlerClient, calls, userOpOptions);
         if (!ok) return false;
       }
       return true;
@@ -393,13 +367,7 @@ async function cmd_setup(network, keyFilePath, accountType = "eoa") {
   console.log(`> Key File: ${cfg.keyFilePath}`);
 
   if (cfg.accountType === "smart") {
-    try {
-      const { smartAccount } = await getSmartAccount(cfg, netConfig, account);
-      console.log(`> Smart Account: ${smartAccount.address}`);
-    } catch (e) {
-      console.log(`> WARN: Could not derive Smart Account: ${e.message}`);
-      console.log(`> Smart Account will be resolved at transaction time.`);
-    }
+    console.log(`> Smart Account: ${account.address} (EIP-7702, same as EOA)`);
   }
 }
 
@@ -427,14 +395,7 @@ async function cmd_account() {
   console.log(`> EOA ETH Balance: ${formatUnits(ethBalance, 18)} ETH`);
 
   if (config.accountType === "smart") {
-    try {
-      const { smartAccount } = await getSmartAccount(config, netConfig, account);
-      const smartBalance = await publicClient.getBalance({ address: smartAccount.address });
-      console.log(`> Smart Account: ${smartAccount.address}`);
-      console.log(`> Smart Account ETH Balance: ${formatUnits(smartBalance, 18)} ETH`);
-    } catch (e) {
-      console.log(`> WARN: Could not derive Smart Account: ${e.message}`);
-    }
+    console.log(`> Mode: EIP-7702 (EOA = Smart Account)`);
   }
 }
 
@@ -569,8 +530,7 @@ async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
 
   // Approve if selling ERC20
   if (!sendingNative) {
-    const approvalCall = await buildApprovalCall(publicClient, senderAddress, fromToken.address, fromToken.symbol, pairPositionAddress, amountIn);
-    if (approvalCall) calls.push(approvalCall);
+    calls.push(...await buildApprovalCalls(publicClient, senderAddress, fromToken.address, fromToken.symbol, pairPositionAddress, amountIn));
   }
 
   // Swap call
@@ -731,12 +691,10 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
 
   // Approve ERC20 tokens
   if (!native0 && amount0 > 0n) {
-    const call = await buildApprovalCall(publicClient, senderAddress, pool.currency0.address, pool.currency0.symbol, pairPositionAddress, amount0);
-    if (call) calls.push(call);
+    calls.push(...await buildApprovalCalls(publicClient, senderAddress, pool.currency0.address, pool.currency0.symbol, pairPositionAddress, amount0));
   }
   if (!native1 && amount1 > 0n) {
-    const call = await buildApprovalCall(publicClient, senderAddress, pool.currency1.address, pool.currency1.symbol, pairPositionAddress, amount1);
-    if (call) calls.push(call);
+    calls.push(...await buildApprovalCalls(publicClient, senderAddress, pool.currency1.address, pool.currency1.symbol, pairPositionAddress, amount1));
   }
 
   // Build PoolKey struct
