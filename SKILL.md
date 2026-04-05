@@ -1,24 +1,21 @@
 ---
 name: agent genesis
 version: 2.1.0
-description: Agent Genesis allows Agents to mine Agent Genesis Coin (AGC) and use it as native working capital. Earn AGC through Proof of Agent (POA) and use it to interact with the Likwid protocol.
+description: Agent Genesis allows Agents to mine Agent Genesis Coin (AGC) and use it as native working capital. Earn AGC through Proof of Agent (POA).
 homepage: https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/main/agc_whitepaper_en.md
 ---
 
 # Agent Genesis
 
-Your mission is to mine your initial **Agent Genesis Coin (AGC)** and interact with the Likwid protocol.
-Initial mining is fully sponsored (gasless) via the Agent Paymaster. Once you hold AGC, you will use it as the underlying asset for protocol operations.
+Your mission is to mine your initial **Agent Genesis Coin (AGC)**.
+Initial mining is fully sponsored (gasless) via the Agent Paymaster.
 
 ## Skill Architecture
 
 | File | Purpose |
 |------|---------|
 | **SKILL.md** (this file) | Core skill — wallet management & mining workflow |
-| **LIKWID.md** | Sub-skill — Likwid Protocol DeFi operations (swap, LP, margin, lend, liquidation) |
-| genesis.js | Wallet & mining CLI |
-| likwid.js | DeFi operations CLI |
-| shared.js | Shared infrastructure (wallet, clients, UserOp, ABIs) |
+| genesis.js | Wallet & mining CLI (self-contained) |
 | package.json | Dependencies |
 | bootstrap.sh | Quick install script |
 
@@ -69,7 +66,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js get_smart_account
 
 > 🎉 **Agent Genesis Skill Ready!**
 >
-> 🔗 **Network:** `<NETWORK_NAME>` (Chain ID `<CHAIN_ID>`) — read from `genesis.js check_wallet` or `genesis.js status` output. This is configured in `shared.js` and must NEVER be hardcoded; it changes automatically when the protocol switches networks.
+> 🔗 **Network:** `<NETWORK_NAME>` (Chain ID `<CHAIN_ID>`) — read from `genesis.js check_wallet` or `genesis.js status` output. This is configured in `genesis.js` and must NEVER be hardcoded; it changes automatically when the protocol switches networks.
 > 🔐 **Smart Account (ERC-4337):** `<SMART_ACCOUNT_ADDRESS>`
 > 🔑 **EOA Signer:** `<EOA_ADDRESS>`
 > 📁 **Wallet File:** `~/.openclaw/.likwid_genesis_wallet.json`
@@ -89,17 +86,6 @@ After the wallet report, immediately present what this skill enables:
 >
 > **⛏️ Mining (Proof of Agent)**
 > Mine AGC tokens by solving AI challenges — your first mine is fully gasless via the Agent Paymaster. You earn AGC every ~24h epoch by proving you are a real AI agent.
->
-> **🛡️ Hedging (after mining with Full Alignment)**
-> Protect your locked vesting tokens against price drops using Likwid Agent Hedge — swap liquid AGC into ETH and open a short position to offset exposure.
->
-> **💰 DeFi Operations (after you hold AGC)**
-> Once you have AGC, you can interact with the Likwid Protocol (see LIKWID.md):
-> • **Swap** — Trade between ETH ↔ AGC
-> • **Add Liquidity** — Provide ETH/AGC liquidity and earn fees
-> • **Margin Trading** — Open leveraged long/short positions on AGC
-> • **Lending** — Lend your ETH or AGC to earn interest
-> • **Liquidation** — Scan and liquidate undercollateralized positions for profit
 >
 > 👉 **Ready to start mining? Just say the word!**
 
@@ -247,14 +233,13 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js cost <SCORE>
 Check ETH balance via `cost` output. If there is a deficit:
 
 > ⚠️ **ETH Top-Up Needed**
-> ⚠️ **ETH Top-Up Needed**
 > Smart Account: `<ADDRESS>`
 > Current Balance: `<BALANCE>` ETH
 > Required: `<REQUIRED>` ETH
 > 📤 **Please send `<DEFICIT>` ETH to the Smart Account address above.**
 > 🔗 **Network:** `<NETWORK_NAME>` (Chain ID `<CHAIN_ID>`)
 >
-> ⚠️ The network name and chain ID above MUST be read from the JS output (`genesis.js cost` / `genesis.js status`). The network is configured in `shared.js` — **never hardcode it**. When the protocol moves to mainnet, the JS output will automatically reflect the correct network.
+> ⚠️ The network name and chain ID above MUST be read from the JS output (`genesis.js cost` / `genesis.js status`). The network is configured in `genesis.js` — **never hardcode it**. When the protocol moves to mainnet, the JS output will automatically reflect the correct network.
 
 Wait for confirmation. Re-run `cost <SCORE>` to verify. Then:
 
@@ -277,7 +262,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js mine <SCORE> <SIGNATURE> 
 > Current AGC Balance: `<NEW_BALANCE>` AGC
 > ⏳ Next mine available in ~24 hours.
 
-Or on failure — see §4 Error Handling.
+Or on failure — see §3 Error Handling.
 
 ### Step 6: Check Cooldown
 ```bash
@@ -293,54 +278,6 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js claim
 **Report to human:**
 > 🔓 **Claimed `<AMOUNT>` vested AGC!**
 > Transaction: `<TX_HASH>`
-
-### Step 8: Hedge Vesting Exposure (Optional — Advanced Strategy)
-
-After mining with Full Alignment, 83% of your AGC is locked in a vesting schedule (83 days linear release). This creates price exposure — if AGC drops, your locked tokens lose value.
-
-**Likwid Agent Hedge** (Whitepaper §6) protects against this by shorting AGC:
-
-1. Swap liquid AGC → ETH
-2. Use ETH as collateral to open a Short AGC position on Likwid
-3. If AGC price drops, the short profit offsets vesting value loss
-
-> ⚠️ **Key Rule**: Shorting AGC requires **ETH** as collateral (not AGC). The hedge command handles the AGC→ETH swap automatically.
-
-**Check hedging opportunity:**
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js hedge_status
-```
-
-**Report to human:**
-> 🛡️ **Hedge Analysis**
-> Liquid AGC: `<LIQUID>` AGC
-> Locked (exposure): `<REMAINING>` AGC (`<DAYS>` days left)
->
-> **Coverage at different leverage:**
-> | Leverage | Short Notional | Coverage |
-> |---|---|---|
-> | 2x | `<VAL>` ETH | `<PCT>`% |
-> | 3x | `<VAL>` ETH | `<PCT>`% |
-> | 5x | `<VAL>` ETH | `<PCT>`% |
->
-> ⚠️ Higher leverage = more coverage but higher liquidation risk.
-> Recommended: **2-3x** for conservative hedging.
-
-**Execute hedge (after human confirms):**
-```bash
-cd ~/.openclaw/skills/agent-genesis && node genesis.js hedge <agc_amount> [leverage] [slippage]
-```
-
-**Report to human:**
-> 🛡️ **Hedge Executed!**
-> Swapped: `<AGC>` AGC → `<ETH>` ETH
-> Opened: Short AGC @ `<LEV>`x (`<ETH>` ETH collateral)
-> Coverage: ~`<PCT>`% of remaining vesting
-
-**Manage the hedge position** via `likwid.js`:
-- `positions` — view all positions including the short
-- `margin_info <id>` — check short health
-- `margin_close <id>` — close when no longer needed
 
 ---
 
@@ -366,19 +303,7 @@ If the human says "auto-mine" or "run mining loop automatically":
 
 ---
 
-## 3. DeFi Operations → LIKWID.md
-
-Once you hold AGC, you can interact with the Likwid Protocol. **All DeFi operations are documented in LIKWID.md** and executed via `likwid.js`.
-
-```bash
-cd ~/.openclaw/skills/agent-genesis && node likwid.js <command>
-```
-
-See LIKWID.md for full details on: swap, add liquidity, margin trading, lending, liquidation, and position management.
-
----
-
-## 4. Error Handling & Communication
+## 3. Error Handling & Communication
 
 When errors occur, **always inform the human clearly**. Never silently swallow errors.
 
@@ -391,13 +316,12 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | **Signature already used / expired** | "🔄 Signature is no longer valid. Starting a fresh mining cycle: reclaim_bill → challenge → verify → mine." |
 | **Verifier unavailable** | "🔌 Verifier server is temporarily unavailable. Will retry in a few minutes." |
 | **Network error** | "🌐 Network error. Check RPC connectivity and retry." |
-| **Approval failed** | "❌ Token approval failed. Subsequent operation was cancelled to prevent errors." |
 
-**Key principle:** If a multi-step operation fails at any step (e.g., approval fails before swap), **stop immediately** and report to the human. Do NOT continue with subsequent steps.
+**Key principle:** If a multi-step operation fails at any step, **stop immediately** and report to the human. Do NOT continue with subsequent steps.
 
 ---
 
-## 5. All Commands Reference
+## 4. All Commands Reference
 
 ### genesis.js — Wallet & Mining
 
@@ -406,7 +330,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `check_wallet` | Check if an EOA wallet exists. |
 | `create_wallet` | Create a new EOA wallet. |
 | `get_smart_account` | Display EOA and Smart Account addresses. |
-| `status` | Full account status (balances, cooldown, vesting, positions). |
+| `status` | Full account status (balances, cooldown, vesting). |
 | `challenge` | Request a PoA challenge from the verifier. |
 | `verify <ans> <con>` | Submit solution to get a mining signature. |
 | `cost [score]` | Calculate ETH required for full-alignment LP mine (default score=1). |
@@ -416,23 +340,3 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `claimable` | Check claimable vested AGC balance. |
 | `claim` | Claim vested AGC tokens. |
 | `reclaim_bill [pp]` | Generate Reclaim billing proof (pp = print proof). |
-| `hedge_status` | Analyze hedging opportunity (vesting exposure, coverage simulation). |
-| `hedge <agc> [lev] [slip]` | Execute hedge: swap AGC→ETH, then open Short AGC position. |
-
-### likwid.js — DeFi Operations (see LIKWID.md)
-
-| Command | Description |
-| :--- | :--- |
-| `swap <dir> <amt> [slip]` | Swap between ETH and AGC. |
-| `lp_add <eth> [slip]` | Add liquidity to ETH/AGC pool. |
-| `margin_open <dir> <amt> [lev]` | Open a margin position. |
-| `lend_open <asset> <amt>` | Lend ETH or AGC. |
-| `liquidate <id>` | Liquidate a margin position. |
-| `scan [window]` | Scan for liquidation opportunities. |
-| `positions` | Scan and display all your DeFi positions. |
-| `margin_info <id>` | View margin position details. |
-| `margin_close <id>` | Close a margin position (full close). |
-| `lp_info <id>` | View LP position details. |
-| `lp_remove <id>` | Remove all liquidity from LP position. |
-| `lend_info <id>` | View lend position details. |
-| `lend_close <id> [amount]` | Withdraw from lend position (default: full). |

@@ -1,62 +1,675 @@
 /**
- * genesis.js — Agent Genesis: Wallet management & AGC mining workflow.
+ * genesis.js — Agent Genesis: Self-contained wallet management & AGC mining workflow.
  *
  * Provides: wallet setup, PoA challenge/verify, mining, vesting, status.
- * DeFi operations (swap, LP, margin, lend, liquidation) are in likwid.js.
+ * Includes all infrastructure: viem clients, ERC-4337 smart account, bundler, UserOp execution.
  */
 
+const { createSmartAccountClient, createBundlerClient, ENTRYPOINT_ADDRESS_V06 } = require("permissionless");
+const { signerToSimpleSmartAccount } = require("permissionless/accounts");
 const {
-  // Config
-  VERIFIER_URL,
-  AGC_TOKEN_ADDRESS,
-  AGENT_PAYMASTER_ADDRESS,
-  LIKWID_HELPER_ADDRESS,
-  POOL_KEY,
-  POOL_ID,
-  WALLET_FILE,
-  NETWORK_NAME,
-  CHAIN_ID,
-  // ABIs
-  ERC20_ABI,
-  LIKWID_HELPER_ABI,
-  // Clients
-  publicClient,
-  // Wallet & Account
-  getWalletInstance,
-  getSmartAccount,
-  // UserOp
-  runUserOp,
-  // Helpers
-  getApprovalCall,
-  formatError,
-  formatHumanSeconds,
-  loadEnvConfig,
-  // viem utilities
+  createPublicClient,
+  custom,
+  http,
   parseEther,
+  toHex,
   encodeFunctionData,
   parseAbi,
-  generatePrivateKey,
-  privateKeyToAccount,
-  fs,
-  path,
-} = require("./shared");
-
+  toFunctionSelector,
+  keccak256,
+  encodeAbiParameters,
+} = require("viem");
+const { sepolia } = require("viem/chains");
+const { privateKeyToAccount, generatePrivateKey } = require("viem/accounts");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 const axios = require("axios");
 const { ReclaimClient } = require("@reclaimprotocol/zk-fetch");
 
-// Load .env config for billing proof
-const { MODEL_TYPE, MODEL_KEY } = loadEnvConfig();
+// ======================= CONFIGURATION =======================
+const CHAIN = sepolia;
+const NETWORK_NAME = CHAIN.name;
+const CHAIN_ID = CHAIN.id;
 
-// Import position scanning from likwid.js (used by status command)
-const {
-  scanUserPositions,
-  LIKWID_MARGIN_POSITION,
-  LIKWID_MARGIN_ABI,
-  LIKWID_PAIR_POSITION,
-  LIKWID_PAIR_ABI,
-  LIKWID_LEND_POSITION,
-  LIKWID_LEND_ABI,
-} = require("./likwid");
+const VERIFIER_URL = "https://verifier.likwid.fi";
+const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
+const BUNDLER_URL = process.env.BUNDLER_URL || "https://bundler.particle.network";
+
+const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
+const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F";
+const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xf624E3E553DF10313Bd3a297423ECB07FB52e6f3";
+
+const ENTRY_POINT_ADDRESS = ENTRYPOINT_ADDRESS_V06;
+const SMART_ACCOUNT_FACTORY_ADDRESS = "0x9406Cc6185a346906296840746125a0E44976454";
+
+// Likwid Helper — used for pool price queries (cost calculation, AGC precharge estimation)
+const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
+
+const POOL_KEY = {
+  currency0: NATIVE_TOKEN_ADDRESS,
+  currency1: AGC_TOKEN_ADDRESS,
+  fee: 3000,
+  marginFee: 3000,
+};
+
+const POOL_ID = keccak256(
+  encodeAbiParameters(
+    [
+      { name: "currency0", type: "address" },
+      { name: "currency1", type: "address" },
+      { name: "fee", type: "uint24" },
+      { name: "marginFee", type: "uint24" },
+    ],
+    [POOL_KEY.currency0, POOL_KEY.currency1, POOL_KEY.fee, POOL_KEY.marginFee],
+  ),
+);
+
+// ======================= ABIs =======================
+const ERC20_ABI = parseAbi([
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function allowance(address owner, address spender) external view returns (uint256)",
+  "function balanceOf(address account) external view returns (uint256)",
+]);
+
+const AGC_MINE_ABI = parseAbi([
+  "function mine(uint256 score, bytes calldata signature, uint256 nonce) external payable",
+]);
+
+const AGC_MINE_SELECTOR = toFunctionSelector(AGC_MINE_ABI[0]);
+
+const AGENT_PAYMASTER_ABI = parseAbi(["function hasFreeMined(address user) external view returns (bool)"]);
+
+const LIKWID_HELPER_ABI = parseAbi([
+  "function getAmountOut(bytes32 poolId, bool zeroForOne, uint256 amountIn, bool dynamicFee) external view returns (uint256 amountOut, uint24 fee, uint256 feeAmount)",
+  "function getAmountIn(bytes32 poolId, bool zeroForOne, uint256 amountOut, bool dynamicFee) external view returns (uint256 amountIn, uint24 fee, uint256 feeAmount)",
+  "function checkMarginPositionLiquidate(uint256 tokenId) external view returns (bool liquidated)",
+  "function getPoolStateInfo(bytes32 poolId) external view returns ((uint128 totalSupply, uint32 lastUpdated, uint24 lpFee, uint24 marginFee, uint24 protocolFee, uint128 realReserve0, uint128 realReserve1, uint128 mirrorReserve0, uint128 mirrorReserve1, uint128 pairReserve0, uint128 pairReserve1, uint128 truncatedReserve0, uint128 truncatedReserve1, uint128 lendReserve0, uint128 lendReserve1, uint128 interestReserve0, uint128 interestReserve1, int128 insuranceFund0, int128 insuranceFund1, uint256 borrow0CumulativeLast, uint256 borrow1CumulativeLast, uint256 deposit0CumulativeLast, uint256 deposit1CumulativeLast) stateInfo)",
+]);
+
+// ======================= CLIENTS =======================
+const publicClient = createPublicClient({
+  chain: CHAIN,
+  transport: http(RPC_URL),
+});
+
+// ======================= BUNDLER =======================
+
+let bundlerRequestId = 0;
+
+function serializeRpcValue(value) {
+  if (typeof value === "bigint") return toHex(value);
+  if (Array.isArray(value)) return value.map(serializeRpcValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, serializeRpcValue(nested)]));
+  }
+  return value;
+}
+
+async function bundlerRequest(method, params) {
+  const response = await fetch(BUNDLER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: ++bundlerRequestId,
+      chainId: CHAIN_ID,
+      method,
+      params: serializeRpcValue(params),
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || response.statusText);
+  }
+  if (payload.error) {
+    const error = new Error(payload.error.message || "Bundler request failed");
+    error.code = payload.error.code;
+    error.extraData = payload.error.extraData;
+    throw error;
+  }
+  return payload.result;
+}
+
+function createParticleBundlerTransport() {
+  return custom({
+    request: ({ method, params }) => bundlerRequest(method, params),
+  });
+}
+
+const bundlerTransport = createParticleBundlerTransport();
+
+const bundlerClient = createBundlerClient({
+  chain: CHAIN,
+  entryPoint: ENTRY_POINT_ADDRESS,
+  transport: bundlerTransport,
+});
+
+async function estimateUserOperationGas(userOperation) {
+  return bundlerClient.estimateUserOperationGas({ userOperation });
+}
+
+async function estimateParticleUserOperationGasRaw(userOperation) {
+  return bundlerRequest("eth_estimateUserOperationGas", [userOperation, ENTRY_POINT_ADDRESS]);
+}
+
+async function getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices) {
+  const opToEstimate = {
+    ...userOperation,
+    paymasterAndData: AGENT_PAYMASTER_ADDRESS,
+    maxFeePerGas: fallbackGasPrices.maxFeePerGas,
+    maxPriorityFeePerGas: fallbackGasPrices.maxPriorityFeePerGas,
+  };
+
+  const [estimate, rawEstimate] = await Promise.all([
+    estimateUserOperationGas(opToEstimate),
+    estimateParticleUserOperationGasRaw(opToEstimate),
+  ]);
+
+  return {
+    ...estimate,
+    maxFeePerGas: rawEstimate.maxFeePerGas ?? fallbackGasPrices.maxFeePerGas,
+    maxPriorityFeePerGas: rawEstimate.maxPriorityFeePerGas ?? fallbackGasPrices.maxPriorityFeePerGas,
+    paymasterAndData: AGENT_PAYMASTER_ADDRESS,
+  };
+}
+
+async function waitForUserOperationReceipt(hash, timeout = 120_000) {
+  return bundlerClient.waitForUserOperationReceipt({ hash, timeout });
+}
+
+async function getBundlerGasPrice() {
+  const fees = await publicClient.estimateFeesPerGas();
+  return {
+    maxFeePerGas: fees.maxFeePerGas,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+  };
+}
+
+async function getDirectEthFallbackGasPrice() {
+  const fees = await getBundlerGasPrice();
+  const minBundlerGasPrice = 1_000_000_000n; // 1 gwei floor for Particle bundler direct ETH mode
+  return {
+    maxFeePerGas: fees.maxFeePerGas > minBundlerGasPrice ? fees.maxFeePerGas : minBundlerGasPrice,
+    maxPriorityFeePerGas:
+      fees.maxPriorityFeePerGas > minBundlerGasPrice ? fees.maxPriorityFeePerGas : minBundlerGasPrice,
+  };
+}
+
+// ======================= WALLET & ACCOUNT =======================
+
+function getWalletInstance() {
+  if (fs.existsSync(WALLET_FILE)) {
+    const data = JSON.parse(fs.readFileSync(WALLET_FILE, "utf8"));
+    let pk = data.privateKey;
+    if (!pk.startsWith("0x")) pk = "0x" + pk;
+    return privateKeyToAccount(pk);
+  }
+  return null;
+}
+
+async function getSmartAccount(signer) {
+  return await signerToSimpleSmartAccount(publicClient, {
+    entryPoint: ENTRY_POINT_ADDRESS,
+    signer: signer,
+    factoryAddress: SMART_ACCOUNT_FACTORY_ADDRESS,
+  });
+}
+
+// ======================= HELPERS =======================
+
+function formatError(msg) {
+  console.log(JSON.stringify({ error: msg }, null, 2));
+}
+
+function formatHumanSeconds(seconds) {
+  const s = Number(seconds);
+  if (s <= 0) return "0s";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s % 60}s`;
+  return `${s}s`;
+}
+
+function formatTokenAmount(value) {
+  return (Number(value) / 1e18).toFixed(6);
+}
+
+function parseCliErrorFields(message) {
+  return Object.fromEntries(
+    message
+      .split("|")
+      .slice(1)
+      .map((entry) => {
+        const [key, value] = entry.split("=");
+        return [key, value];
+      }),
+  );
+}
+
+function sanitizeCliField(value) {
+  return String(value).replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+}
+
+function getNormalizedErrorMessage(error) {
+  return [
+    error?.message,
+    error?.cause?.message,
+    typeof error?.extraData === "string" ? error.extraData : null,
+    error?.details,
+    typeof error?.shortMessage === "string" ? error.shortMessage : null,
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+}
+
+function isFreeMineCall(call) {
+  return (
+    call &&
+    call.to &&
+    typeof call.to === "string" &&
+    call.to.toLowerCase() === AGC_TOKEN_ADDRESS.toLowerCase() &&
+    typeof call.data === "string" &&
+    call.data.startsWith(AGC_MINE_SELECTOR)
+  );
+}
+
+function isFreeMineOperation(calls) {
+  if (!Array.isArray(calls)) {
+    return isFreeMineCall(calls);
+  }
+  return calls.length > 0 && calls.every(isFreeMineCall);
+}
+
+function getRequiredPrefundForUserOperation(userOperation, hasPaymaster = false) {
+  const callGasLimit = BigInt(userOperation.callGasLimit ?? 0n);
+  const verificationGasLimit = BigInt(userOperation.verificationGasLimit ?? 0n);
+  const preVerificationGas = BigInt(userOperation.preVerificationGas ?? 0n);
+  const maxFeePerGas = BigInt(userOperation.maxFeePerGas ?? 0n);
+  const verificationMultiplier = hasPaymaster ? 3n : 1n;
+
+  return (callGasLimit + verificationGasLimit * verificationMultiplier + preVerificationGas) * maxFeePerGas;
+}
+
+function getOperationRequiredEth(calls) {
+  const callList = Array.isArray(calls) ? calls : [calls];
+  return callList.reduce((sum, call) => sum + BigInt(call?.value ?? 0n), 0n);
+}
+
+function maxBigInt(...values) {
+  return values.reduce((max, value) => (value > max ? value : max), 0n);
+}
+
+async function getPaymasterUserOperationEstimateOrThrow(callData, ethSmartAccountClient) {
+  const gasPrices = await getBundlerGasPrice();
+  const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
+    userOperation: { callData },
+  });
+
+  try {
+    return await getSponsoredUserOperationEstimate(ethUserOperation, gasPrices);
+  } catch (error) {
+    throw new Error(
+      `CLI_PAYMASTER_ESTIMATE_FAILED|reason=${sanitizeCliField(getNormalizedErrorMessage(error).slice(0, 200))}`,
+    );
+  }
+}
+
+async function getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient) {
+  const estimate = await getPaymasterUserOperationEstimateOrThrow(callData, ethSmartAccountClient);
+  const estimatedAgcPrecharge = await estimateAgcPrechargeFromPaymasterEstimate(estimate);
+  return { estimate, estimatedAgcPrecharge };
+}
+
+async function estimateAgcPrechargeFromRequiredEth(requiredEthPrefund) {
+  if (!requiredEthPrefund || requiredEthPrefund <= 0n) return 0n;
+
+  const reserveQuote = await getAgcQuoteFromReserves(requiredEthPrefund);
+  const spotQuote = await getAgcQuoteFromSpot(requiredEthPrefund);
+  let helperQuote = 0n;
+
+  try {
+    const res = await publicClient.readContract({
+      address: LIKWID_HELPER_ADDRESS,
+      abi: LIKWID_HELPER_ABI,
+      functionName: "getAmountIn",
+      args: [POOL_ID, false, requiredEthPrefund, true],
+    });
+    helperQuote = (BigInt(res[0]) * 110n) / 100n;
+  } catch {
+    helperQuote = 0n;
+  }
+
+  return maxBigInt(helperQuote, reserveQuote, spotQuote);
+}
+
+async function estimateAgcPrechargeFromPaymasterEstimate(paymasterEstimate) {
+  const requiredEthPrefund = getRequiredPrefundForUserOperation(paymasterEstimate, true);
+  return estimateAgcPrechargeFromRequiredEth((requiredEthPrefund * 31n) / 10n);
+}
+
+async function getAgcQuoteFromReserves(requiredEthPrefund) {
+  const state = await publicClient.readContract({
+    address: LIKWID_HELPER_ADDRESS,
+    abi: LIKWID_HELPER_ABI,
+    functionName: "getPoolStateInfo",
+    args: [POOL_ID],
+  });
+
+  const reserveEth = BigInt(state.pairReserve0);
+  const reserveAgc = BigInt(state.pairReserve1);
+  if (reserveEth === 0n || reserveAgc === 0n) return 0n;
+
+  return (requiredEthPrefund * reserveAgc * 120n) / (reserveEth * 100n);
+}
+
+async function getAgcQuoteFromSpot(requiredEthPrefund) {
+  const oneEth = 10n ** 18n;
+  const res = await publicClient.readContract({
+    address: LIKWID_HELPER_ADDRESS,
+    abi: LIKWID_HELPER_ABI,
+    functionName: "getAmountOut",
+    args: [POOL_ID, true, oneEth, true],
+  });
+  const agcPerEth = BigInt(res[0]);
+  if (agcPerEth === 0n) return 0n;
+
+  return (requiredEthPrefund * agcPerEth * 120n) / (oneEth * 100n);
+}
+
+function loadEnvConfig() {
+  let MODEL_TYPE = process.env.MODEL_TYPE || null;
+  let MODEL_KEY = process.env.MODEL_KEY || null;
+  try {
+    const envPath = path.join(process.cwd(), ".env");
+    if (fs.existsSync(envPath)) {
+      const envConfig = Object.fromEntries(
+        fs
+          .readFileSync(envPath, "utf8")
+          .split("\n")
+          .map((line) => line.match(/^\s*([^=]+?)\s*=(.*)$/))
+          .filter(Boolean)
+          .map(([, key, val]) => [key, val.trim().replace(/^"|"$/g, "")]),
+      );
+      MODEL_TYPE = MODEL_TYPE || envConfig.MODEL_TYPE || null;
+      MODEL_KEY = MODEL_KEY || envConfig.MODEL_KEY || null;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return { MODEL_TYPE, MODEL_KEY };
+}
+
+// ======================= USER OPERATION =======================
+
+async function runUserOp(account, calls, description) {
+  let gasPaymentMode = "agc";
+  const expectsFreeMine = isFreeMineOperation(calls);
+  let canUseFreeMine = false;
+  let preferredGasMode = "agc";
+  let ethBalance;
+  let agcBalance;
+  let estimatedDirectEthCost = null;
+  let paymasterEstimateSucceeded = false;
+  let estimatedAgcPrecharge = null;
+
+  if (expectsFreeMine) {
+    try {
+      const hasFreeMined = await publicClient.readContract({
+        address: AGENT_PAYMASTER_ADDRESS,
+        abi: AGENT_PAYMASTER_ABI,
+        functionName: "hasFreeMined",
+        args: [account.address],
+      });
+      canUseFreeMine = !hasFreeMined;
+    } catch {
+      canUseFreeMine = false;
+    }
+  }
+
+  const smartAccountClient = createSmartAccountClient({
+    account,
+    entryPoint: ENTRY_POINT_ADDRESS,
+    chain: CHAIN,
+    bundlerTransport,
+    middleware: {
+      sponsorUserOperation: async ({ userOperation }) => {
+        console.log(`> Estimating gas and attaching custom paymaster (${description})...`);
+        const fallbackGasPrices = await getBundlerGasPrice();
+
+        try {
+          const estimate = await getSponsoredUserOperationEstimate(userOperation, fallbackGasPrices);
+          gasPaymentMode = canUseFreeMine ? "free" : "agc";
+
+          return {
+            ...estimate,
+            verificationGasLimit:
+              BigInt(estimate.verificationGasLimit) > 600000n ? estimate.verificationGasLimit : 600000n,
+          };
+        } catch (paymasterError) {
+          const paymasterErrorMessage = [
+            paymasterError?.message,
+            paymasterError?.cause?.message,
+            typeof paymasterError?.extraData === "string" ? paymasterError.extraData : null,
+          ]
+            .filter(Boolean)
+            .join(" | ");
+          console.log(`> ⚠️  Paymaster estimation/attachment failed: ${paymasterErrorMessage.slice(0, 160)}`);
+          throw paymasterError;
+        }
+      },
+    },
+  });
+
+  const encodedCalls = Array.isArray(calls) && calls.length === 1 ? calls[0] : calls;
+
+  const ethSmartAccountClient = createSmartAccountClient({
+    account,
+    entryPoint: ENTRY_POINT_ADDRESS,
+    chain: CHAIN,
+    bundlerTransport,
+    middleware: {
+      gasPrice: getDirectEthFallbackGasPrice,
+    },
+  });
+
+  console.log(`> Packaging UserOperation for ${description}...`);
+  try {
+    const callData = await account.encodeCallData(encodedCalls);
+    let userOpHash;
+    // After removing DeFi operations, only mine/claim calls go through runUserOp.
+    // Neither targets Likwid contracts, so operation-required AGC is always 0.
+    const operationRequiredAgc = 0n;
+    const operationRequiredEth = getOperationRequiredEth(calls);
+
+    try {
+      const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
+        userOperation: { callData },
+      });
+      estimatedDirectEthCost = getRequiredPrefundForUserOperation(ethUserOperation);
+    } catch (ethEstimateError) {
+      console.log(
+        `> ⚠️  Direct ETH gas estimation failed: ${getNormalizedErrorMessage(ethEstimateError).slice(0, 160)}`,
+      );
+    }
+
+    [ethBalance, agcBalance] = await Promise.all([
+      publicClient.getBalance({ address: account.address }),
+      publicClient.readContract({
+        address: AGC_TOKEN_ADDRESS,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [account.address],
+      }),
+    ]);
+
+    const totalRequiredEthForDirect =
+      estimatedDirectEthCost === null ? null : estimatedDirectEthCost + operationRequiredEth;
+    const hasEnoughEthForDirectGas = totalRequiredEthForDirect !== null && ethBalance >= totalRequiredEthForDirect;
+    const hasEnoughAgcForOperation = agcBalance >= operationRequiredAgc;
+
+    if (!hasEnoughAgcForOperation) {
+      const shortfallAgc = operationRequiredAgc - agcBalance;
+      throw new Error(
+        [
+          "CLI_INSUFFICIENT_OPERATION_AGC",
+          `required=${formatTokenAmount(operationRequiredAgc)}`,
+          `available=${formatTokenAmount(agcBalance)}`,
+          `op_shortfall=${formatTokenAmount(shortfallAgc)}`,
+        ].join("|"),
+      );
+    }
+
+    if (hasEnoughEthForDirectGas) {
+      preferredGasMode = "eth";
+    } else if (canUseFreeMine) {
+      preferredGasMode = "agc";
+    } else {
+      const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient);
+      estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
+      const totalRequiredAgc = operationRequiredAgc + estimatedAgcPrecharge;
+
+      if (agcBalance < totalRequiredAgc) {
+        throw new Error(
+          [
+            "CLI_INSUFFICIENT_TOTAL_AGC",
+            `operation=${formatTokenAmount(operationRequiredAgc)}`,
+            `precharge=${formatTokenAmount(estimatedAgcPrecharge)}`,
+            `required=${formatTokenAmount(totalRequiredAgc)}`,
+            `available=${formatTokenAmount(agcBalance)}`,
+            `shortfall=${formatTokenAmount(totalRequiredAgc - agcBalance)}`,
+          ].join("|"),
+        );
+      }
+      preferredGasMode = "agc";
+      paymasterEstimateSucceeded = true;
+    }
+
+    const submitWithEth = async () => {
+      gasPaymentMode = "eth";
+      const ethUserOperation = await ethSmartAccountClient.prepareUserOperationRequest({
+        userOperation: { callData },
+      });
+      ethUserOperation.signature = await account.signUserOperation(ethUserOperation);
+      return bundlerRequest("eth_sendUserOperation", [ethUserOperation, ENTRY_POINT_ADDRESS]);
+    };
+
+    const submitWithPaymaster = async () =>
+      smartAccountClient.sendUserOperation({
+        userOperation: { callData },
+      });
+
+    if (preferredGasMode === "eth") {
+      console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
+      if (estimatedDirectEthCost !== null) {
+        console.log(`> Estimated direct ETH gas required: ${Number(estimatedDirectEthCost) / 1e18} ETH`);
+      }
+      if (operationRequiredEth > 0n) {
+        console.log(`> ETH required by operation: ${Number(operationRequiredEth) / 1e18} ETH`);
+      }
+      console.log("> Using direct ETH gas payment...");
+      userOpHash = await submitWithEth();
+    } else {
+      console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
+      console.log(`> Smart account AGC balance: ${Number(agcBalance) / 1e18} AGC`);
+      if (!canUseFreeMine) {
+        console.log(`> Required AGC for operation: ${Number(operationRequiredAgc) / 1e18} AGC`);
+        if (!paymasterEstimateSucceeded) {
+          console.log("> Checking paymaster estimate...");
+          const paymasterEstimate = await getPaymasterEstimateWithPrechargeOrThrow(callData, ethSmartAccountClient);
+          estimatedAgcPrecharge = paymasterEstimate.estimatedAgcPrecharge;
+          paymasterEstimateSucceeded = true;
+        }
+        console.log(`> Estimated AGC precharge: ${Number(estimatedAgcPrecharge) / 1e18} AGC`);
+      }
+      console.log("> Using AGC / paymaster gas payment...");
+      userOpHash = await submitWithPaymaster();
+    }
+
+    console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
+    console.log("> Waiting for receipt...");
+    const receipt = await waitForUserOperationReceipt(userOpHash, 120_000);
+    if (receipt.success !== true || receipt.receipt?.status !== "success") {
+      throw new Error(
+        [
+          "CLI_USEROP_REVERTED",
+          `reason=${sanitizeCliField(receipt.reason || "unknown")}`,
+          `tx_hash=${receipt.receipt?.transactionHash || "unknown"}`,
+          `gas_used=${receipt.actualGasUsed ? receipt.actualGasUsed.toString() : "unknown"}`,
+          `gas_cost_eth=${receipt.actualGasCost ? formatTokenAmount(receipt.actualGasCost) : "unknown"}`,
+        ].join("|"),
+      );
+    }
+    const gasNote =
+      gasPaymentMode === "free"
+        ? " (first mine sponsored by paymaster)"
+        : gasPaymentMode === "eth"
+          ? " (gas paid in ETH)"
+          : " (gas paid in AGC)";
+    console.log(`\n> ✅ ${description} Successful!${gasNote} Tx Hash: ${receipt.receipt.transactionHash}`);
+    return receipt;
+  } catch (e) {
+    const errMsg = e.message || String(e);
+    if (errMsg.startsWith("CLI_INSUFFICIENT_OPERATION_AGC|")) {
+      const fields = parseCliErrorFields(errMsg);
+      console.log(`> ❌ ${description} aborted.`);
+      console.log(`> AGC for operation is insufficient.`);
+      console.log(`> Required:  ${fields.required} AGC`);
+      console.log(`> Available: ${fields.available} AGC`);
+      console.log(`> Operation shortfall: ${fields.op_shortfall} AGC`);
+      return null;
+    }
+    if (errMsg.startsWith("CLI_PAYMASTER_ESTIMATE_FAILED|")) {
+      const fields = parseCliErrorFields(errMsg);
+      console.log(`> ❌ ${description} aborted.`);
+      console.log(`> Paymaster estimate failed.`);
+      console.log(`> This transaction cannot proceed with AGC gas sponsorship right now.`);
+      console.log(`> Detail: ${fields.reason}`);
+      return null;
+    }
+    if (errMsg.startsWith("CLI_INSUFFICIENT_TOTAL_AGC|")) {
+      const fields = parseCliErrorFields(errMsg);
+      console.log(`> ❌ ${description} aborted.`);
+      console.log(`> AGC is insufficient for operation + paymaster precharge.`);
+      console.log(`> Operation: ${fields.operation} AGC`);
+      console.log(`> Precharge: ${fields.precharge} AGC`);
+      console.log(`> Required:  ${fields.required} AGC`);
+      console.log(`> Available: ${fields.available} AGC`);
+      console.log(`> Shortfall: ${fields.shortfall} AGC`);
+      return null;
+    }
+    if (errMsg.startsWith("CLI_USEROP_REVERTED|")) {
+      const fields = parseCliErrorFields(errMsg);
+      console.log(`> ❌ ${description} reverted onchain.`);
+      console.log(`> Tx Hash: ${fields.tx_hash}`);
+      console.log(`> Reason: ${fields.reason}`);
+      console.log(`> Gas Used: ${fields.gas_used}`);
+      console.log(`> Gas Cost: ${fields.gas_cost_eth} ETH`);
+      return null;
+    }
+    if (errMsg.includes("EstimateGas") || errMsg.includes("execution reverted") || errMsg.includes("AA")) {
+      console.log(`> ❌ ${description} failed during gas estimation or execution.`);
+      console.log(`>`);
+      console.log(`> Possible causes:`);
+      console.log(`>   1. Insufficient token balance or allowance`);
+      console.log(`>   2. Insufficient AGC for paymaster AND insufficient ETH for direct gas payment`);
+      console.log(`>   3. Contract rejected the operation (invalid params or state)`);
+      console.log(`>`);
+      console.log(`> Technical detail: ${errMsg.slice(0, 200)}`);
+    } else {
+      console.error(`> ${description} execution failed:`, e.stack || errMsg);
+    }
+    return null;
+  }
+}
+
+// ======================= .env CONFIG =======================
+const { MODEL_TYPE, MODEL_KEY } = loadEnvConfig();
 
 // ======================= WALLET MANAGEMENT =======================
 
@@ -207,43 +820,6 @@ async function status() {
     console.log(`> Fully Vested: ${vest.fullyVestedAt}`);
     console.log(`> LP Token ID: ${vest.lpTokenId}`);
   }
-
-  // Scan positions summary (from likwid.js)
-  try {
-    const [marginPositions, lpPositions, lendPositions] = await Promise.all([
-      scanUserPositions(LIKWID_MARGIN_POSITION, LIKWID_MARGIN_ABI, account.address, 200),
-      scanUserPositions(LIKWID_PAIR_POSITION, LIKWID_PAIR_ABI, account.address, 200),
-      scanUserPositions(LIKWID_LEND_POSITION, LIKWID_LEND_ABI, account.address, 200),
-    ]);
-
-    if (marginPositions.length > 0 || lpPositions.length > 0 || lendPositions.length > 0) {
-      console.log(`>`);
-      console.log(`> 📋 DeFi Positions:`);
-      if (marginPositions.length > 0) {
-        console.log(`>   📈 Margin: ${marginPositions.length} position(s)`);
-        for (const p of marginPositions) {
-          const dir = p.marginForOne ? "Long AGC" : "Long ETH";
-          console.log(
-            `>     #${p.id} ${dir} | Margin: ${(Number(p.marginAmount) / 1e18).toFixed(4)} | Debt: ${(Number(p.debtAmount) / 1e18).toFixed(4)}`,
-          );
-        }
-      }
-      if (lpPositions.length > 0) {
-        console.log(`>   💧 LP: ${lpPositions.length} position(s)`);
-        for (const p of lpPositions) {
-          console.log(`>     #${p.id} Liq: ${(Number(p.liquidity) / 1e18).toFixed(4)}`);
-        }
-      }
-      if (lendPositions.length > 0) {
-        console.log(`>   🏦 Lend: ${lendPositions.length} position(s)`);
-        for (const p of lendPositions) {
-          console.log(`>     #${p.id} Amount: ${(Number(p.lendAmount) / 1e18).toFixed(4)}`);
-        }
-      }
-    }
-  } catch (e) {
-    // Position scanning is best-effort
-  }
 }
 
 async function challenge() {
@@ -257,7 +833,6 @@ async function challenge() {
     if (d.intro) console.log(`> Intro: ${d.intro}`);
     if (d.required_word) console.log(`> Required Word: ${d.required_word}`);
     if (d.constraints) console.log(`> Constraints: ${d.constraints}`);
-    // Also output raw JSON for programmatic use
     console.log(`> ---`);
     console.log(JSON.stringify(d, null, 2));
   } catch (e) {
@@ -351,7 +926,6 @@ async function verify(answer, constraints) {
       console.log(`> ❌ Verification Failed`);
       if (d.message) console.log(`> Reason: ${d.message}`);
     }
-    // Also output raw JSON for programmatic use
     console.log(`> ---`);
     console.log(JSON.stringify(d, null, 2));
   } catch (e) {
@@ -510,336 +1084,6 @@ async function mine(scoreStr, signature, nonceStr, ethAmountStr) {
   await runUserOp(account, mineCall, "Mine AGC");
 }
 
-// ======================= HEDGING =======================
-
-async function hedge_status() {
-  const signer = getWalletInstance();
-  if (!signer) return formatError("No wallet found. Run create_wallet first.");
-  const account = await getSmartAccount(signer);
-
-  // Get balances
-  const [ethBal, agcBal] = await Promise.all([
-    publicClient.getBalance({ address: account.address }),
-    publicClient.readContract({
-      address: AGC_TOKEN_ADDRESS,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [account.address],
-    }),
-  ]);
-
-  // Get vesting info
-  let vestInfo = null;
-  try {
-    const v = await publicClient.readContract({
-      address: AGC_TOKEN_ADDRESS,
-      abi: parseAbi([
-        "function vestingSchedules(address) view returns (uint256 totalLocked, uint256 released, uint256 startTime, uint256 endTime, uint256 lpTokenId)",
-      ]),
-      functionName: "vestingSchedules",
-      args: [account.address],
-    });
-    if (v[0] > 0n) {
-      vestInfo = {
-        totalLocked: v[0],
-        released: v[1],
-        remaining: v[0] - v[1],
-        endTime: v[3],
-      };
-    }
-  } catch (e) {}
-
-  // Get claimable vested
-  let claimableAmt = 0n;
-  try {
-    claimableAmt = await publicClient.readContract({
-      address: AGC_TOKEN_ADDRESS,
-      abi: parseAbi(["function getClaimableVested(address) view returns (uint256)"]),
-      functionName: "getClaimableVested",
-      args: [account.address],
-    });
-  } catch (e) {}
-
-  const totalAvailableAgc = agcBal + claimableAmt;
-
-  console.log(`> 🛡️ Hedge Status`);
-  console.log(`> Address: ${account.address}`);
-  console.log(`>`);
-  console.log(`> 💰 Liquid AGC: ${(Number(agcBal) / 1e18).toFixed(6)} AGC`);
-  if (claimableAmt > 0n) {
-    console.log(`> 🔓 Claimable Vested: ${(Number(claimableAmt) / 1e18).toFixed(6)} AGC`);
-    console.log(`> 📊 Total Available: ${(Number(totalAvailableAgc) / 1e18).toFixed(6)} AGC`);
-    console.log(`>    💡 Run 'claim' first to unlock claimable AGC before hedging.`);
-  }
-  console.log(`> 💎 ETH Balance: ${(Number(ethBal) / 1e18).toFixed(6)} ETH`);
-
-  if (!vestInfo) {
-    console.log(`>`);
-    console.log(`> ⚠️ No vesting schedule found. Nothing to hedge.`);
-    return;
-  }
-
-  const remaining = vestInfo.remaining;
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  const daysLeft = vestInfo.endTime > now ? Number(vestInfo.endTime - now) / 86400 : 0;
-
-  console.log(`>`);
-  console.log(`> 🔒 Vesting:`);
-  console.log(`>   Total Locked: ${(Number(vestInfo.totalLocked) / 1e18).toFixed(6)} AGC`);
-  console.log(`>   Released: ${(Number(vestInfo.released) / 1e18).toFixed(6)} AGC`);
-  console.log(`>   Remaining (exposure): ${(Number(remaining) / 1e18).toFixed(6)} AGC`);
-  console.log(`>   Days Left: ${daysLeft.toFixed(1)}`);
-
-  if (agcBal <= 0n) {
-    console.log(`>`);
-    console.log(`> ⚠️ No liquid AGC available for hedging.`);
-    return;
-  }
-
-  // Simulate swap AGC → ETH
-  try {
-    const res = await publicClient.readContract({
-      address: LIKWID_HELPER_ADDRESS,
-      abi: LIKWID_HELPER_ABI,
-      functionName: "getAmountOut",
-      args: [POOL_ID, false, agcBal, true],
-    });
-    const ethOut = res[0];
-
-    // Get pool reserves for coverage calculation
-    const state = await publicClient.readContract({
-      address: LIKWID_HELPER_ADDRESS,
-      abi: LIKWID_HELPER_ABI,
-      functionName: "getPoolStateInfo",
-      args: [POOL_ID],
-    });
-    const r0 = BigInt(state.pairReserve0);
-    const r1 = BigInt(state.pairReserve1);
-    // Value of remaining locked AGC in ETH = remaining * (r0 / r1)
-    const remainingValueEth = r1 > 0n ? (remaining * r0) / r1 : 0n;
-
-    console.log(`>`);
-    console.log(`> 📈 Hedge Simulation (swap ${(Number(agcBal) / 1e18).toFixed(2)} AGC → ~${(Number(ethOut) / 1e18).toFixed(6)} ETH):`);
-
-    for (const lev of [2, 3, 5]) {
-      const shortNotional = ethOut * BigInt(lev);
-      const coveragePct =
-        remainingValueEth > 0n ? Number((shortNotional * 10000n) / remainingValueEth) / 100 : 0;
-      console.log(
-        `>   ${lev}x leverage → Short ~${(Number(shortNotional) / 1e18).toFixed(6)} ETH notional → ${coveragePct.toFixed(1)}% coverage`,
-      );
-    }
-
-    console.log(`>`);
-    console.log(`> 💡 To execute: node genesis.js hedge <agc_amount> [leverage] [slippage]`);
-    console.log(`>    Example: node genesis.js hedge ${(Number(agcBal) / 1e18).toFixed(2)} 2`);
-  } catch (e) {
-    console.log(`>`);
-    console.log(`> ⚠️ Could not simulate swap: ${e.message}`);
-  }
-}
-
-async function hedge(agcAmountStr, leverageStr = "2", slippageStr = "1") {
-  if (!agcAmountStr) {
-    console.log(`> Usage: hedge <agc_amount> [leverage] [slippage]`);
-    console.log(`>`);
-    console.log(`> Hedging swaps your liquid AGC into ETH, then opens a Short AGC`);
-    console.log(`> position using that ETH as collateral — protecting your locked`);
-    console.log(`> vesting tokens against price drops.`);
-    console.log(`>`);
-    console.log(`>   agc_amount  Amount of AGC to swap into ETH for collateral`);
-    console.log(`>   leverage    Leverage multiplier (1-5, default: 2)`);
-    console.log(`>   slippage    Swap slippage tolerance % (default: 1)`);
-    console.log(`>`);
-    console.log(`> Examples:`);
-    console.log(`>   hedge 1000 2     Swap 1000 AGC → ETH, short @ 2x`);
-    console.log(`>   hedge 5000 3 2   Swap 5000 AGC → ETH, short @ 3x, 2% slippage`);
-    console.log(`>`);
-    console.log(`> Run 'hedge_status' first to see your hedging opportunity.`);
-    return;
-  }
-
-  const signer = getWalletInstance();
-  if (!signer) return formatError("No wallet found. Run create_wallet first.");
-  const account = await getSmartAccount(signer);
-
-  const agcAmount = parseEther(agcAmountStr);
-  const leverage = parseInt(leverageStr);
-  const slippage = BigInt(slippageStr);
-
-  if (leverage < 1 || leverage > 5) {
-    return formatError("Leverage must be between 1 and 5 (max per Likwid protocol rules).");
-  }
-
-  // 1. Check AGC balance
-  const agcBal = await publicClient.readContract({
-    address: AGC_TOKEN_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: "balanceOf",
-    args: [account.address],
-  });
-
-  if (agcBal < agcAmount) {
-    console.log(`> ❌ Insufficient AGC balance!`);
-    console.log(`> Required: ${agcAmountStr} AGC`);
-    console.log(`> Available: ${(Number(agcBal) / 1e18).toFixed(6)} AGC`);
-    console.log(`> 💡 Run 'claim' to unlock vested AGC, or reduce the hedge amount.`);
-    return;
-  }
-
-  // 2. Simulate swap AGC → ETH
-  let ethOut;
-  try {
-    const res = await publicClient.readContract({
-      address: LIKWID_HELPER_ADDRESS,
-      abi: LIKWID_HELPER_ABI,
-      functionName: "getAmountOut",
-      args: [POOL_ID, false, agcAmount, true],
-    });
-    ethOut = res[0];
-  } catch (e) {
-    return formatError(`Swap simulation failed: ${e.message}`);
-  }
-
-  const ethOutMin = (ethOut * (100n - slippage)) / 100n;
-  const shortNotional = ethOut * BigInt(leverage);
-
-  // 3. Show execution plan
-  console.log(`> 🛡️ Hedge Execution Plan`);
-  console.log(`>`);
-  console.log(`> Step 1: Swap ${agcAmountStr} AGC → ~${(Number(ethOut) / 1e18).toFixed(6)} ETH`);
-  console.log(`>   Slippage: ${slippageStr}% | Min ETH: ${(Number(ethOutMin) / 1e18).toFixed(6)}`);
-  console.log(`>`);
-  console.log(`> Step 2: Open Short AGC @ ${leverage}x with ~${(Number(ethOut) / 1e18).toFixed(6)} ETH`);
-  console.log(`>   Short notional: ~${(Number(shortNotional) / 1e18).toFixed(6)} ETH`);
-  console.log(`>`);
-  console.log(`> Executing...`);
-
-  // 4. Capture ETH balance before swap
-  const ethBalBefore = await publicClient.getBalance({ address: account.address });
-
-  // 5. Execute Step 1: Swap AGC → ETH
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
-  const swapCalls = [];
-  let swapDesc = "";
-
-  const agcApproval = await getApprovalCall(account.address, AGC_TOKEN_ADDRESS, LIKWID_PAIR_POSITION, agcAmount);
-  if (agcApproval) {
-    swapCalls.push(agcApproval);
-    swapDesc += "Approve AGC + ";
-  }
-
-  const pmApproval = await getApprovalCall(
-    account.address,
-    AGC_TOKEN_ADDRESS,
-    AGENT_PAYMASTER_ADDRESS,
-    parseEther("1000000"),
-  );
-  if (pmApproval) {
-    swapCalls.push(pmApproval);
-    swapDesc += "Approve Paymaster + ";
-  }
-
-  swapCalls.push({
-    to: LIKWID_PAIR_POSITION,
-    value: 0n,
-    data: encodeFunctionData({
-      abi: LIKWID_PAIR_ABI,
-      functionName: "exactInput",
-      args: [
-        {
-          poolId: POOL_ID,
-          zeroForOne: false,
-          to: account.address,
-          amountIn: agcAmount,
-          amountOutMin: ethOutMin,
-          deadline,
-        },
-      ],
-    }),
-  });
-  swapDesc += "Swap AGC→ETH (Hedge Step 1)";
-
-  console.log(`> 📤 ${swapDesc}`);
-  const swapReceipt = await runUserOp(account, swapCalls, swapDesc);
-  if (!swapReceipt) {
-    return formatError("Swap failed. Hedge aborted — no funds were spent.");
-  }
-
-  // 6. Calculate actual ETH received (gas paid by paymaster, so balance diff = swap output)
-  const ethBalAfter = await publicClient.getBalance({ address: account.address });
-  const ethReceived = ethBalAfter - ethBalBefore;
-  console.log(`> Received: ${(Number(ethReceived) / 1e18).toFixed(6)} ETH from swap`);
-
-  if (ethReceived <= 0n) {
-    return formatError("No ETH received from swap. Hedge aborted.");
-  }
-
-  // 7. Execute Step 2: Open Short AGC with all received ETH
-  const deadline2 = BigInt(Math.floor(Date.now() / 1000) + 300);
-  const marginCalls = [];
-  let marginDesc = "";
-
-  const pmApproval2 = await getApprovalCall(
-    account.address,
-    AGC_TOKEN_ADDRESS,
-    AGENT_PAYMASTER_ADDRESS,
-    parseEther("1000000"),
-  );
-  if (pmApproval2) {
-    marginCalls.push(pmApproval2);
-    marginDesc += "Approve Paymaster + ";
-  }
-
-  marginCalls.push({
-    to: LIKWID_MARGIN_POSITION,
-    value: ethReceived,
-    data: encodeFunctionData({
-      abi: LIKWID_MARGIN_ABI,
-      functionName: "addMargin",
-      args: [
-        POOL_KEY,
-        {
-          marginForOne: false, // Short AGC = margin on token0 (ETH) side
-          leverage,
-          marginAmount: ethReceived,
-          borrowAmount: 0n,
-          borrowAmountMax: parseEther("1000000000"),
-          recipient: account.address,
-          deadline: deadline2,
-        },
-      ],
-    }),
-  });
-  marginDesc += `Open Short AGC ${leverage}x (Hedge Step 2)`;
-
-  console.log(`> 📤 ${marginDesc}`);
-  const marginReceipt = await runUserOp(account, marginCalls, marginDesc);
-  if (!marginReceipt) {
-    console.log(`> ⚠️ Short position failed. Your ${(Number(ethReceived) / 1e18).toFixed(6)} ETH from the swap is still in your wallet.`);
-    console.log(`> 💡 You can retry manually: node likwid.js margin_open short ${(Number(ethReceived) / 1e18).toFixed(6)} ${leverage}`);
-    return;
-  }
-
-  // 8. Final status
-  const [finalEth, finalAgc] = await Promise.all([
-    publicClient.getBalance({ address: account.address }),
-    publicClient.readContract({
-      address: AGC_TOKEN_ADDRESS,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [account.address],
-    }),
-  ]);
-
-  console.log(`>`);
-  console.log(`> ✅ Hedge Complete!`);
-  console.log(`>   Swapped: ${agcAmountStr} AGC → ${(Number(ethReceived) / 1e18).toFixed(6)} ETH`);
-  console.log(`>   Opened: Short AGC @ ${leverage}x (${(Number(ethReceived) / 1e18).toFixed(6)} ETH collateral)`);
-  console.log(`>   Final ETH: ${(Number(finalEth) / 1e18).toFixed(6)} ETH`);
-  console.log(`>   Final AGC: ${(Number(finalAgc) / 1e18).toFixed(6)} AGC`);
-}
-
 // ======================= CLI ROUTER =======================
 const args = process.argv.slice(2);
 const command = args[0];
@@ -855,7 +1099,7 @@ Setup:
   get_smart_account         Display EOA and Smart Account addresses.
 
 Mining Workflow:
-  status                    Full account status (balances, cooldown, vesting, positions).
+  status                    Full account status (balances, cooldown, vesting).
   challenge                 Request a PoA challenge from the verifier.
   verify <ans> <constraints> Submit solution to get a mining signature.
   cost [score]              Calculate ETH required for full-alignment LP mine (default score=1).
@@ -865,17 +1109,10 @@ Vesting:
   claimable                 Check claimable vested AGC balance.
   claim                     Claim vested AGC tokens.
 
-Hedging (Whitepaper §6 — Likwid Agent Hedge):
-  hedge_status              Analyze hedging opportunity (vesting, coverage simulation).
-  hedge <agc> [lev] [slip]  Execute hedge: swap AGC→ETH → open Short AGC position.
-
 Info:
   cooldown                  Check time until next mining opportunity.
   reward [score]            Check estimated reward (default score=1).
   reclaim_bill [pp]         Generate Reclaim billing proof (pp = print proof).
-
-DeFi Operations → use likwid.js:
-  node likwid.js <command>  See likwid.js --help for swap, LP, margin, lend, liquidation.
 `);
   process.exit(0);
 }
@@ -921,15 +1158,8 @@ DeFi Operations → use likwid.js:
     case "reclaim_bill":
       await reclaim_bill(args[1]);
       break;
-    case "hedge_status":
-      await hedge_status();
-      break;
-    case "hedge":
-      await hedge(args[1], args[2], args[3]);
-      break;
     default:
       console.log("Unknown command:", command);
-      console.log("For DeFi operations, use: node likwid.js <command>");
   }
   process.exit(0);
 })();
