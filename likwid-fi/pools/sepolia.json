@@ -24,12 +24,8 @@
       "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
       "decimals": 18
     },
-    "TKB": {
-      "address": "0x1f70b255d00c2e8cf58c9f45fd6280fae0b56318",
-      "decimals": 18
-    },
-    "TKA": {
-      "address": "0xe3be7cd9fa2113fd3c60b1e52b1dd5d287de3cc4",
+    "AGC": {
+      "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
       "decimals": 18
     }
   },
@@ -65,15 +61,15 @@
       "marginFee": 3000
     },
     {
-      "name": "TKB / TKA",
+      "name": "ETH / AGC",
       "currency0": {
-        "address": "0x1f70b255d00c2e8cf58c9f45fd6280fae0b56318",
-        "symbol": "TKB",
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
         "decimals": 18
       },
       "currency1": {
-        "address": "0xe3be7cd9fa2113fd3c60b1e52b1dd5d287de3cc4",
-        "symbol": "TKA",
+        "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+        "symbol": "AGC",
         "decimals": 18
       },
       "fee": 3000,
