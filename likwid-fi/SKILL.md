@@ -221,7 +221,53 @@ Or on failure:
 
 ---
 
-## 3. Error Handling
+## 3. Create a Pair
+
+Create a new Likwid pool by initializing it on-chain. Tokens are resolved by name from the network config.
+
+### Step 1: Check Available Tokens
+
+```bash
+node likwid-fi.js pools
+```
+
+The tokens available for pairing are defined in `pools/<network>.json` under `tokens`. Current Sepolia tokens: ETH, USDT, LIKWID.
+
+### Step 2: Create the Pair
+
+```bash
+node likwid-fi.js create_pair <token0> <token1> <fee> <marginFee>
+```
+
+- `<token0>`, `<token1>`: Token names (e.g., `ETH`, `USDT`). Addresses are auto-sorted to satisfy `currency0 < currency1`.
+- `<fee>`, `<marginFee>`: Fee values in basis points (e.g., `3000` = 0.30%).
+
+**Report to human:**
+
+> **Create Pair Preview:**
+> currency0: `<SYMBOL0>` (`<ADDRESS0>`)
+> currency1: `<SYMBOL1>` (`<ADDRESS1>`)
+> Swap Fee: `<FEE>`%  Margin Fee: `<MARGIN_FEE>`%
+> Pool ID: `<POOL_ID>`
+>
+> Proceed? (yes/no)
+
+**Wait for human confirmation before executing.**
+
+**On success:**
+
+> **Pair Created!**
+> Pool added to config as index `[<INDEX>]`.
+> Use `lp_add <INDEX> <currency> <amount>` to add initial liquidity.
+
+**If pool already exists:**
+
+> **Pool Already Exists**
+> This pair is already initialized on-chain. Use `pools` to check if it's in your config, or `lp_add` to add liquidity.
+
+---
+
+## 4. Error Handling
 
 When errors occur, **always inform the human clearly**. Never silently swallow errors.
 
@@ -240,7 +286,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 
 ---
 
-## 3. All Commands Reference
+## 5. All Commands Reference
 
 | Command | Description |
 |:---|:---|
@@ -251,6 +297,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `quote <pool> <dir> <amt>` | Get swap output estimate without executing. |
 | `swap <pool> <dir> <amt> [slip]` | Execute a swap. |
 | `lp_add <pool> <cur> <amt> [slip]` | Add liquidity. `<cur>`: `0` or `1`. |
+| `create_pair <t0> <t1> <fee> <mfee>` | Create a new pool. Tokens by name. |
 
 ### Arguments
 
@@ -264,10 +311,12 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `<cur>` | `0`, `1` | Which currency to provide (other auto-calculated). |
 | `<amt>` | `"0.01"`, `"100"` | Human-readable token amount. |
 | `[slip]` | `1`, `0.5`, `3` | Slippage tolerance in % (default: `1`). |
+| `<t0>`, `<t1>` | `ETH`, `USDT`, ... | Token names from network config `tokens`. |
+| `<fee>`, `<mfee>` | `3000` | Fee in basis points (3000 = 0.30%). |
 
 ---
 
-## 4. Adding New Networks
+## 6. Adding New Networks
 
 To add a new network, create a JSON file in `pools/<network>.json`:
 

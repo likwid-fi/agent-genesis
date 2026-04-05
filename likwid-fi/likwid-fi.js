@@ -284,19 +284,22 @@ async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) 
         if (zeroCalls.length > 0) {
           console.log(`> Submitting approvals (${zeroCalls.length} call${zeroCalls.length > 1 ? "s" : ""})...`);
           const ok = await submitUserOp(bundlerClient, zeroCalls);
-          if (!ok) return;
+          if (!ok) return false;
         }
         for (const vc of valueCalls) {
           console.log(`> Submitting value-carrying call...`);
           const ok = await submitUserOp(bundlerClient, [vc]);
-          if (!ok) return;
+          if (!ok) return false;
         }
       } else {
         console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
-        await submitUserOp(bundlerClient, calls);
+        const ok = await submitUserOp(bundlerClient, calls);
+        if (!ok) return false;
       }
+      return true;
     } catch (e) {
       console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
+      return false;
     }
   } else {
     // --- EOA: execute calls sequentially ---
@@ -315,14 +318,15 @@ async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) 
         const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
         if (receipt.status !== "success") {
           console.log(`> TX_REVERTED: ${txHash}`);
-          return;
+          return false;
         }
       } catch (e) {
         console.log(`> ERROR: Transaction failed: ${e.shortMessage || e.message}`);
-        return;
+        return false;
       }
     }
     console.log(`> TX_OK`);
+    return true;
   }
 }
 
@@ -771,6 +775,179 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
   await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
 }
 
+// ======================= CREATE PAIR =======================
+
+function saveNetworkConfig(network, netConfig) {
+  const file = path.join(POOLS_DIR, `${network}.json`);
+  fs.writeFileSync(file, JSON.stringify(netConfig, null, 2) + "\n");
+}
+
+function resolveToken(netConfig, name) {
+  const upper = name.toUpperCase();
+  const token = netConfig.tokens[upper];
+  if (!token) return null;
+  return { symbol: upper, address: token.address, decimals: token.decimals };
+}
+
+function isAddress(s) {
+  return /^0x[0-9a-fA-F]{40}$/.test(s);
+}
+
+async function resolveTokenOrAddress(netConfig, nameOrAddress, publicClient) {
+  // Try name lookup first
+  const byName = resolveToken(netConfig, nameOrAddress);
+  if (byName) return byName;
+
+  // If it looks like an address, query on-chain
+  if (!isAddress(nameOrAddress)) return null;
+
+  const address = getAddress(nameOrAddress);
+  const tokenAbi = parseAbi([
+    "function symbol() view returns (string)",
+    "function decimals() view returns (uint8)",
+  ]);
+
+  try {
+    const [symbol, decimals] = await Promise.all([
+      publicClient.readContract({ address, abi: tokenAbi, functionName: "symbol" }),
+      publicClient.readContract({ address, abi: tokenAbi, functionName: "decimals" }),
+    ]);
+    return { symbol, address: address.toLowerCase(), decimals };
+  } catch (e) {
+    console.log(`> WARN: Could not read token metadata at ${address}: ${e.shortMessage || e.message}`);
+    return null;
+  }
+}
+
+async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
+  if (!token0Name || !token1Name || !feeStr || !marginFeeStr) {
+    console.log(`> Usage: create_pair <token0> <token1> <fee> <marginFee>`);
+    console.log(`> Tokens can be resolved by name or contract address.`);
+    console.log(`> Fee values in basis points (e.g., 3000 = 0.30%).`);
+    return;
+  }
+
+  const config = loadConfig();
+  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
+
+  const netConfig = loadNetworkConfig(config.network);
+  if (!netConfig) return;
+
+  // --- Resolve sender (need publicClient for token lookup) ---
+  const privateKey = readPrivateKey(config.keyFilePath);
+  if (!privateKey) return;
+  const eoaAccount = privateKeyToAccount(privateKey);
+  const chain = CHAINS[config.network];
+  const publicClient = createPublicClient({ chain, transport: resolveRpc(config, netConfig) });
+
+  // --- Resolve tokens (by name or address) ---
+  const tokenA = await resolveTokenOrAddress(netConfig, token0Name, publicClient);
+  const tokenB = await resolveTokenOrAddress(netConfig, token1Name, publicClient);
+
+  if (!tokenA) {
+    const available = Object.keys(netConfig.tokens).join(", ");
+    return console.log(`> ERROR: Unknown token "${token0Name}". Available: ${available} (or pass a contract address)`);
+  }
+  if (!tokenB) {
+    const available = Object.keys(netConfig.tokens).join(", ");
+    return console.log(`> ERROR: Unknown token "${token1Name}". Available: ${available} (or pass a contract address)`);
+  }
+  if (tokenA.address.toLowerCase() === tokenB.address.toLowerCase()) {
+    return console.log(`> ERROR: currency0 and currency1 cannot be the same token.`);
+  }
+
+  // --- Sort: protocol requires currency0 < currency1 ---
+  let currency0, currency1;
+  if (tokenA.address.toLowerCase() < tokenB.address.toLowerCase()) {
+    currency0 = tokenA;
+    currency1 = tokenB;
+  } else {
+    currency0 = tokenB;
+    currency1 = tokenA;
+  }
+
+  const fee = parseInt(feeStr);
+  const marginFee = parseInt(marginFeeStr);
+
+  const poolKey = {
+    currency0: currency0.address,
+    currency1: currency1.address,
+    fee,
+    marginFee,
+  };
+
+  // Compute poolId for display
+  const poolObj = {
+    currency0, currency1, fee, marginFee,
+  };
+  const poolId = computePoolId(poolObj);
+
+  console.log(`> CREATE_PAIR`);
+  console.log(`> currency0: ${currency0.symbol} (${currency0.address})`);
+  console.log(`> currency1: ${currency1.symbol} (${currency1.address})`);
+  console.log(`> Swap Fee: ${(fee / 10000).toFixed(2)}%  Margin Fee: ${(marginFee / 10000).toFixed(2)}%`);
+  console.log(`> Pool ID: ${poolId}`);
+
+  const vaultABI = loadABI("LikwidVault");
+  const vaultAddress = netConfig.contracts.LikwidVault;
+
+  const calls = [{
+    to: vaultAddress,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: vaultABI,
+      functionName: "initialize",
+      args: [poolKey],
+    }),
+  }];
+
+  console.log(`> Initializing pool on LikwidVault...`);
+  const ok = await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
+  if (!ok) return;
+
+  // --- Auto-add new tokens to config ---
+  let configChanged = false;
+  for (const token of [currency0, currency1]) {
+    const alreadyKnown = Object.values(netConfig.tokens).some(
+      t => t.address.toLowerCase() === token.address.toLowerCase()
+    );
+    if (!alreadyKnown) {
+      netConfig.tokens[token.symbol] = { address: token.address.toLowerCase(), decimals: token.decimals };
+      console.log(`> Token added to config: ${token.symbol} (${token.address})`);
+      configChanged = true;
+    }
+  }
+
+  // --- Auto-append pool to config ---
+  const newPool = {
+    name: `${currency0.symbol} / ${currency1.symbol}`,
+    currency0: { address: currency0.address, symbol: currency0.symbol, decimals: currency0.decimals },
+    currency1: { address: currency1.address, symbol: currency1.symbol, decimals: currency1.decimals },
+    fee,
+    marginFee,
+  };
+
+  const exists = netConfig.pools.some(p =>
+    p.currency0.address.toLowerCase() === currency0.address.toLowerCase() &&
+    p.currency1.address.toLowerCase() === currency1.address.toLowerCase() &&
+    p.fee === fee && p.marginFee === marginFee
+  );
+
+  if (!exists) {
+    netConfig.pools.push(newPool);
+    configChanged = true;
+    console.log(`> Pool added to config as index [${netConfig.pools.length - 1}].`);
+  } else {
+    console.log(`> Pool already in config.`);
+  }
+
+  if (configChanged) {
+    saveNetworkConfig(config.network, netConfig);
+  }
+
+  console.log(`> Use "lp_add" to add initial liquidity to this pool.`);
+}
+
 // ======================= CLI ROUTER =======================
 
 if (require.main === module) {
@@ -796,6 +973,7 @@ Pool Info:
 DeFi Actions:
   swap <pool> <dir> <amount> [slippage%]    Execute swap.
   lp_add <pool> <currency> <amt> [slip%]    Add liquidity. currency: 0 or 1.
+  create_pair <t0> <t1> <fee> <marginFee>   Create a new pool. Tokens by name or address.
 
 Arguments:
   <pool>      Pool index from "pools" command (e.g., 0, 1)
@@ -829,6 +1007,9 @@ Arguments:
           break;
         case "lp_add":
           await cmd_lp_add(args[1], args[2], args[3], args[4]);
+          break;
+        case "create_pair":
+          await cmd_create_pair(args[1], args[2], args[3], args[4]);
           break;
         default:
           console.log(`> Unknown command: ${command}`);
