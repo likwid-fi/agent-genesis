@@ -110,8 +110,9 @@ node likwid-fi.js pools
 
 > **Available Pools on `<NETWORK>`:**
 >
-> `[0]` ETH / USDT — Fee: 0.30%
-> `[1]` ETH / LIKWID — Fee: 0.30%
+> ETH/USDT (fee: 0.30%)
+> ETH/LIKWID (fee: 0.30%)
+> ETH/LIKWID (fee: 0.50%)
 >
 > Which pool and direction?
 
@@ -120,7 +121,7 @@ node likwid-fi.js pools
 Before executing, always preview the swap:
 
 ```bash
-node likwid-fi.js quote <poolIndex> <direction> <amount>
+node likwid-fi.js quote <pool> <direction> <amount>
 ```
 
 **Direction:**
@@ -141,7 +142,7 @@ node likwid-fi.js quote <poolIndex> <direction> <amount>
 ### Step 3: Execute Swap
 
 ```bash
-node likwid-fi.js swap <poolIndex> <direction> <amount> [slippage%]
+node likwid-fi.js swap <pool> <direction> <amount> [slippage%]
 ```
 
 Default slippage: 1%.
@@ -167,17 +168,17 @@ Provide liquidity to a Likwid pool and receive an LP position (ERC-721 NFT).
 ### Step 1: Select Pool & Check State
 
 ```bash
-node likwid-fi.js pool_info <poolIndex>
+node likwid-fi.js pool_info <pool>
 ```
 
 **If pool is not initialized:**
 
 > **Pool Not Initialized**
-> Pool `[<INDEX>]` `<NAME>` has no liquidity. You need to Create a Pair first.
+> Pool `<NAME>` (fee: `<FEE>`%) has no liquidity. You need to Create a Pair first.
 
 **If pool exists, report to human:**
 
-> **Pool `[<INDEX>]` `<NAME>`**
+> **Pool `<NAME>` (fee: `<FEE>`%)**
 > Reserve `<SYMBOL0>`: `<RESERVE0>`
 > Reserve `<SYMBOL1>`: `<RESERVE1>`
 > Rate: 1 `<SYMBOL0>` = `<RATE>` `<SYMBOL1>`
@@ -189,7 +190,7 @@ node likwid-fi.js pool_info <poolIndex>
 The user provides an amount for **one side** (currency `0` or `1`). The matching amount is auto-calculated.
 
 ```bash
-node likwid-fi.js lp_add <poolIndex> <currency> <amount> [slippage%]
+node likwid-fi.js lp_add <pool> <currency> <amount> [slippage%]
 ```
 
 - `<currency>`: `0` for currency0, `1` for currency1
@@ -198,7 +199,7 @@ node likwid-fi.js lp_add <poolIndex> <currency> <amount> [slippage%]
 **Report to human before execution:**
 
 > **Add Liquidity Preview:**
-> Pool: `[<INDEX>]` `<NAME>`
+> Pool: `<NAME>` (fee: `<FEE>`%)
 > Rate: 1 `<SYMBOL0>` = `<RATE>` `<SYMBOL1>`
 > `<SYMBOL0>`: `<AMOUNT0>`
 > `<SYMBOL1>`: `<AMOUNT1>`
@@ -257,8 +258,8 @@ node likwid-fi.js create_pair <token0> <token1> <fee> <marginFee>
 **On success:**
 
 > **Pair Created!**
-> Pool added to config as index `[<INDEX>]`.
-> Use `lp_add <INDEX> <currency> <amount>` to add initial liquidity.
+> Pool added to config: `<NAME>` (fee: `<FEE>`%).
+> Use `lp_add <NAME> <currency> <amount>` to add initial liquidity.
 
 **If pool already exists:**
 
@@ -275,7 +276,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 |---|---|
 | **Not configured** | "Run setup first: `node likwid-fi.js setup <network> <keyFile> <accountType>`" |
 | **Key file not found** | "Private key file not found at `<PATH>`. Please check the path." |
-| **Pool not found** | "Pool index `<N>` not found. Run `pools` to see available pools." |
+| **Pool not found** | "Pool `<NAME>` not found. Use token pair (e.g. ETH/USDT). Run `pools` to list." |
 | **Quote failed** | "Could not get quote — pool may have insufficient liquidity." |
 | **Approval failed** | "Token approval failed. Swap was NOT executed." |
 | **Swap reverted** | "Swap transaction reverted. No funds were lost. Check slippage or try a smaller amount." |
@@ -306,7 +307,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `<net>` | `sepolia`, `ethereum`, `base` | Target network. |
 | `<key>` | File path | Path to file containing private key. |
 | `[type]` | `eoa`, `smart` | Account type (default: `eoa`). |
-| `<pool>` | `0`, `1`, ... | Pool index from `pools` output. |
+| `<pool>` | `ETH/USDT`, `ETH-LIKWID` | Token pair. Lowest fee tier selected by default. |
 | `<dir>` | `0to1`, `1to0` | Swap direction. |
 | `<cur>` | `0`, `1` | Which currency to provide (other auto-calculated). |
 | `<amt>` | `"0.01"`, `"100"` | Human-readable token amount. |

@@ -412,20 +412,23 @@ async function cmd_pools() {
   console.log(`> POOLS on ${netConfig.network} (Chain ID ${netConfig.chainId})`);
   console.log(`>`);
 
-  netConfig.pools.forEach((pool, i) => {
-    const poolId = computePoolId(pool);
-    console.log(`> [${i}] ${pool.name}`);
-    console.log(`>     ${pool.currency0.symbol} (${pool.currency0.address})`);
-    console.log(`>     ${pool.currency1.symbol} (${pool.currency1.address})`);
-    console.log(`>     Swap Fee: ${(pool.fee / 10000).toFixed(2)}%  Margin Fee: ${(pool.marginFee / 10000).toFixed(2)}%`);
-    console.log(`>     Pool ID: ${poolId}`);
-    console.log(`>`);
+  Object.entries(netConfig.pools).forEach(([name, tiers]) => {
+    tiers.forEach((pool) => {
+      const poolId = computePoolId(pool);
+      console.log(`> ${name} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+      console.log(`>     ${pool.currency0.symbol} (${pool.currency0.address})`);
+      console.log(`>     ${pool.currency1.symbol} (${pool.currency1.address})`);
+      console.log(`>     Margin Fee: ${(pool.marginFee / 10000).toFixed(2)}%`);
+      console.log(`>     Pool ID: ${poolId}`);
+      console.log(`>`);
+    });
   });
 }
 
-async function cmd_quote(poolIndexStr, direction, amountStr) {
-  if (!poolIndexStr || !direction || !amountStr) {
-    console.log(`> Usage: quote <poolIndex> <direction> <amount>`);
+async function cmd_quote(poolStr, direction, amountStr) {
+  if (!poolStr || !direction || !amountStr) {
+    console.log(`> Usage: quote <pool> <direction> <amount>`);
+    console.log(`> Pool: token pair (e.g. ETH/USDT) — lowest fee tier selected by default`);
     console.log(`> Direction: 0to1 (currency0 -> currency1) or 1to0 (currency1 -> currency0)`);
     return;
   }
@@ -436,9 +439,8 @@ async function cmd_quote(poolIndexStr, direction, amountStr) {
   const netConfig = loadNetworkConfig(config.network);
   if (!netConfig) return;
 
-  const poolIndex = parseInt(poolIndexStr);
-  const pool = netConfig.pools[poolIndex];
-  if (!pool) return console.log(`> ERROR: Pool index ${poolIndex} not found. Run "pools" to see available pools.`);
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
 
   const zeroForOne = direction === "0to1";
   const fromToken = zeroForOne ? pool.currency0 : pool.currency1;
@@ -464,7 +466,7 @@ async function cmd_quote(poolIndexStr, direction, amountStr) {
     const feeAmount = result[2] !== undefined ? result[2] : 0n;
 
     console.log(`> QUOTE`);
-    console.log(`> Pool: [${poolIndex}] ${pool.name}`);
+    console.log(`> Pool: ${pool.currency0.symbol}/${pool.currency1.symbol} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
     console.log(`> Input: ${amountStr} ${fromToken.symbol}`);
     console.log(`> Output: ~${formatUnits(amountOut, toToken.decimals)} ${toToken.symbol}`);
     console.log(`> Fee: ${(fee / 10000).toFixed(2)}% (${formatUnits(feeAmount, fromToken.decimals)} ${fromToken.symbol})`);
@@ -473,9 +475,10 @@ async function cmd_quote(poolIndexStr, direction, amountStr) {
   }
 }
 
-async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
-  if (!poolIndexStr || !direction || !amountStr) {
-    console.log(`> Usage: swap <poolIndex> <direction> <amount> [slippage%]`);
+async function cmd_swap(poolStr, direction, amountStr, slippageStr = "1") {
+  if (!poolStr || !direction || !amountStr) {
+    console.log(`> Usage: swap <pool> <direction> <amount> [slippage%]`);
+    console.log(`> Pool: token pair (e.g. ETH/USDT) — lowest fee tier selected by default`);
     console.log(`> Direction: 0to1 (currency0 -> currency1) or 1to0 (currency1 -> currency0)`);
     console.log(`> Default slippage: 1%`);
     return;
@@ -485,9 +488,8 @@ async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
   if (!ctx) return;
   const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
 
-  const poolIndex = parseInt(poolIndexStr);
-  const pool = netConfig.pools[poolIndex];
-  if (!pool) return console.log(`> ERROR: Pool index ${poolIndex} not found. Run "pools" to see available pools.`);
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
 
   const zeroForOne = direction === "0to1";
   const fromToken = zeroForOne ? pool.currency0 : pool.currency1;
@@ -552,9 +554,10 @@ async function cmd_swap(poolIndexStr, direction, amountStr, slippageStr = "1") {
 
 // ======================= POOL INFO =======================
 
-async function cmd_pool_info(poolIndexStr) {
-  if (poolIndexStr === undefined) {
-    console.log(`> Usage: pool_info <poolIndex>`);
+async function cmd_pool_info(poolStr) {
+  if (poolStr === undefined) {
+    console.log(`> Usage: pool_info <pool>`);
+    console.log(`> Pool: token pair (e.g. ETH/USDT) — lowest fee tier selected by default`);
     return;
   }
 
@@ -564,9 +567,8 @@ async function cmd_pool_info(poolIndexStr) {
   const netConfig = loadNetworkConfig(config.network);
   if (!netConfig) return;
 
-  const poolIndex = parseInt(poolIndexStr);
-  const pool = netConfig.pools[poolIndex];
-  if (!pool) return console.log(`> ERROR: Pool index ${poolIndex} not found. Run "pools" to see available pools.`);
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
 
   const poolId = computePoolId(pool);
   const helperABI = loadABI("LikwidHelper");
@@ -584,9 +586,11 @@ async function cmd_pool_info(poolIndexStr) {
     const r0 = stateInfo.pairReserve0;
     const r1 = stateInfo.pairReserve1;
 
+    const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
+
     if (r0 === 0n && r1 === 0n) {
       console.log(`> POOL_NOT_INITIALIZED`);
-      console.log(`> Pool: [${poolIndex}] ${pool.name}`);
+      console.log(`> Pool: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
       console.log(`> This pool has no liquidity. You need to Create a Pair first.`);
       return;
     }
@@ -595,7 +599,7 @@ async function cmd_pool_info(poolIndexStr) {
     const rate1to0 = Number(formatUnits(r0, pool.currency0.decimals)) / Number(formatUnits(r1, pool.currency1.decimals));
 
     console.log(`> POOL_INFO`);
-    console.log(`> Pool: [${poolIndex}] ${pool.name}`);
+    console.log(`> Pool: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
     console.log(`> Pool ID: ${poolId}`);
     console.log(`> Pair Reserve ${pool.currency0.symbol}: ${formatUnits(r0, pool.currency0.decimals)}`);
     console.log(`> Pair Reserve ${pool.currency1.symbol}: ${formatUnits(r1, pool.currency1.decimals)}`);
@@ -609,9 +613,10 @@ async function cmd_pool_info(poolIndexStr) {
 
 // ======================= ADD LIQUIDITY =======================
 
-async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1") {
-  if (!poolIndexStr || !currencyStr || !amountStr) {
-    console.log(`> Usage: lp_add <poolIndex> <currency> <amount> [slippage%]`);
+async function cmd_lp_add(poolStr, currencyStr, amountStr, slippageStr = "1") {
+  if (!poolStr || !currencyStr || !amountStr) {
+    console.log(`> Usage: lp_add <pool> <currency> <amount> [slippage%]`);
+    console.log(`> Pool: token pair (e.g. ETH/USDT) — lowest fee tier selected by default`);
     console.log(`> Currency: 0 (currency0) or 1 (currency1)`);
     console.log(`> Provide the amount for one side; the other is auto-calculated from pool ratio.`);
     return;
@@ -621,9 +626,8 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
   if (!ctx) return;
   const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
 
-  const poolIndex = parseInt(poolIndexStr);
-  const pool = netConfig.pools[poolIndex];
-  if (!pool) return console.log(`> ERROR: Pool index ${poolIndex} not found. Run "pools" to see available pools.`);
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
 
   const inputSide = parseInt(currencyStr);
   if (inputSide !== 0 && inputSide !== 1) {
@@ -653,9 +657,11 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
     return console.log(`> ERROR: Could not query pool state: ${e.shortMessage || e.message}`);
   }
 
+  const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
+
   if (r0 === 0n && r1 === 0n) {
     console.log(`> POOL_NOT_INITIALIZED`);
-    console.log(`> Pool: [${poolIndex}] ${pool.name}`);
+    console.log(`> Pool: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
     console.log(`> This pool has no liquidity. You need to Create a Pair first.`);
     return;
   }
@@ -676,7 +682,7 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
 
   const rate = Number(formatUnits(r1, pool.currency1.decimals)) / Number(formatUnits(r0, pool.currency0.decimals));
 
-  console.log(`> LP_ADD: [${poolIndex}] ${pool.name}`);
+  console.log(`> LP_ADD: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
   console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
   console.log(`> ${pool.currency0.symbol}: ${formatUnits(amount0, pool.currency0.decimals)}`);
   console.log(`> ${pool.currency1.symbol}: ${formatUnits(amount1, pool.currency1.decimals)}`);
@@ -725,6 +731,20 @@ async function cmd_lp_add(poolIndexStr, currencyStr, amountStr, slippageStr = "1
 function saveNetworkConfig(network, netConfig) {
   const file = path.join(POOLS_DIR, `${network}.json`);
   fs.writeFileSync(file, JSON.stringify(netConfig, null, 2) + "\n");
+}
+
+function resolvePool(netConfig, poolStr) {
+  // Normalize: uppercase, replace - with /
+  const key = poolStr.toUpperCase().replace("-", "/");
+  // Direct key match
+  let tiers = netConfig.pools[key];
+  if (!tiers) {
+    // Try reversed order: "USDT/ETH" -> "ETH/USDT"
+    const parts = key.split("/");
+    if (parts.length === 2) tiers = netConfig.pools[`${parts[1]}/${parts[0]}`];
+  }
+  if (!tiers || tiers.length === 0) return null;
+  return tiers[0]; // lowest fee (array pre-sorted)
 }
 
 function resolveToken(netConfig, name) {
@@ -855,24 +875,22 @@ async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
   }
 
   // --- Auto-append pool to config ---
+  const pairKey = `${currency0.symbol}/${currency1.symbol}`;
   const newPool = {
-    name: `${currency0.symbol} / ${currency1.symbol}`,
     currency0: { address: currency0.address, symbol: currency0.symbol, decimals: currency0.decimals },
     currency1: { address: currency1.address, symbol: currency1.symbol, decimals: currency1.decimals },
     fee,
     marginFee,
   };
 
-  const exists = netConfig.pools.some(p =>
-    p.currency0.address.toLowerCase() === currency0.address.toLowerCase() &&
-    p.currency1.address.toLowerCase() === currency1.address.toLowerCase() &&
-    p.fee === fee && p.marginFee === marginFee
-  );
+  if (!netConfig.pools[pairKey]) netConfig.pools[pairKey] = [];
+  const exists = netConfig.pools[pairKey].some(p => p.fee === fee && p.marginFee === marginFee);
 
   if (!exists) {
-    netConfig.pools.push(newPool);
+    netConfig.pools[pairKey].push(newPool);
+    netConfig.pools[pairKey].sort((a, b) => a.fee - b.fee);
     configChanged = true;
-    console.log(`> Pool added to config as index [${netConfig.pools.length - 1}].`);
+    console.log(`> Pool added to config: ${pairKey} (fee: ${(fee / 10000).toFixed(2)}%).`);
   } else {
     console.log(`> Pool already in config.`);
   }
@@ -881,7 +899,7 @@ async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
     saveNetworkConfig(config.network, netConfig);
   }
 
-  console.log(`> Use "lp_add" to add initial liquidity to this pool.`);
+  console.log(`> Use "lp_add ${pairKey}" to add initial liquidity to this pool.`);
 }
 
 // ======================= CLI ROUTER =======================
@@ -912,7 +930,7 @@ DeFi Actions:
   create_pair <t0> <t1> <fee> <marginFee>   Create a new pool. Tokens by name or address.
 
 Arguments:
-  <pool>      Pool index from "pools" command (e.g., 0, 1)
+  <pool>      Token pair (e.g. ETH/USDT). Lowest fee tier selected by default.
   <dir>       Swap direction: 0to1 or 1to0
   <amount>    Human-readable amount (e.g., "0.01", "100")
   [slippage]  Slippage tolerance in % (default: 1)
