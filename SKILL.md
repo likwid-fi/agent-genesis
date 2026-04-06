@@ -9,6 +9,7 @@ homepage: https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/m
 
 Your mission is to mine your initial **Agent Genesis Coin (AGC)**.
 Initial mining is fully sponsored (gasless) via the Agent Paymaster.
+Subsequent mines use a three-tier gas model: **free** (first mine) → **ETH direct** (if ETH balance sufficient) → **AGC paymaster** (AGC used to cover gas).
 
 ## Skill Architecture
 
@@ -67,8 +68,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js get_smart_account
 > 🎉 **Agent Genesis Skill Ready!**
 >
 > 🔗 **Network:** `<NETWORK_NAME>` (Chain ID `<CHAIN_ID>`) — read from `genesis.js check_wallet` or `genesis.js status` output. This is configured in `genesis.js` and must NEVER be hardcoded; it changes automatically when the protocol switches networks.
-> 🔐 **Smart Account (ERC-4337):** `<SMART_ACCOUNT_ADDRESS>`
-> 🔑 **EOA Signer:** `<EOA_ADDRESS>`
+> 🔐 **Smart Account (EIP-7702, same as EOA):** `<ADDRESS>`
 > 📁 **Wallet File:** `~/.openclaw/.likwid_genesis_wallet.json`
 >
 > ⚠️ **CRITICAL SAFETY WARNING:**
@@ -120,7 +120,7 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js status
 
 ### Step 2: Request Challenge
 
-**Before requesting a challenge**, check if the agent has a Model API Key configured for billing verification. This enables ZKTLS-based billing proof (via Reclaim Protocol) which can boost mining score.
+**Before requesting a challenge**, check if the agent has a Model API Key configured for billing verification. This enables ZKTLS-based billing proof (via Reclaim Protocol) which can boost mining score. Note: `reclaim_bill` is called automatically inside `verify` — you do NOT need to run it as a separate step.
 
 **Check for `.env` configuration:**
 ```bash
@@ -286,10 +286,10 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js claim
 The full mining loop (**every step must be fresh — no reuse from previous rounds**):
 
 ```
-status → cooldown → reclaim_bill → challenge → verify → reward(score) → cost(score) → mine → report
+status → cooldown → challenge → verify (includes reclaim_bill) → reward(score) → cost(score) → mine → report
 ```
 
-Repeat every epoch (~24h). Each iteration requires a **new billing proof, new challenge, new signature**.
+Repeat every epoch (~24h). Each iteration requires a **new challenge, new signature** (billing proof is generated automatically inside `verify`).
 
 ### Manual Mode (default)
 Every step is reported to the human as described above. Human chooses the settlement path each time.
