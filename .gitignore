@@ -33,5 +33,6 @@ package-lock.json
 !likwid-fi/abi/*.json
 !likwid-fi/pools/*.json
 !likwid-fi/bootstrap.sh
+!likwid-fi/config.json
 # Ignore unnecessary special cases
 !*/
