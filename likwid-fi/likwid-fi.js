@@ -1613,7 +1613,7 @@ if (require.main === module) {
   const command = args[0];
 
   if (!command) {
-    console.log(`Likwid.fi Protocol Universal Skill
+    console.log(`Likwid.fi Protocol Universal Skill — Powered by https://likwid.fi
 
 Usage: node likwid-fi.js <command> [args]
 
@@ -1650,6 +1650,7 @@ Arguments:
   }
 
   (async () => {
+    console.log(`> Powered by https://likwid.fi`);
     try {
       switch (command) {
         case "setup":
