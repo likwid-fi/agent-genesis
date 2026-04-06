@@ -75,6 +75,22 @@
         "fee": 5000,
         "marginFee": 5000
       }
+    ],
+    "ETH/AGC": [
+      {
+        "currency0": {
+          "address": "0x0000000000000000000000000000000000000000",
+          "symbol": "ETH",
+          "decimals": 18
+        },
+        "currency1": {
+          "address": "0x7262bA32E60702cFc388D93c3366485539eD79bB",
+          "symbol": "AGC",
+          "decimals": 18
+        },
+        "fee": 3000,
+        "marginFee": 3000
+      }
     ]
   }
 }

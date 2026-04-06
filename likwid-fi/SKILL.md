@@ -341,7 +341,121 @@ node likwid-fi.js create_pair <token0> <token1> <fee> <marginFee>
 
 ---
 
-## 4. Error Handling
+## 4. Margin Trading
+
+Open leveraged long/short positions on Likwid pools.
+
+### Understanding Direction
+
+For pool `ETH/LIKWID` (currency0=ETH, currency1=LIKWID):
+
+| Direction | Meaning | Collateral | Borrow |
+|---|---|---|---|
+| `long` | Long LIKWID (Short ETH) | LIKWID | ETH |
+| `short` | Short LIKWID (Long ETH) | ETH | LIKWID |
+
+Direction is always relative to **currency1**. `long` = bullish on currency1, `short` = bearish on currency1.
+
+### Step 1: Get Quote
+
+Always preview before opening a position:
+
+```bash
+node likwid-fi.js margin_quote <pool> <direction> <leverage> <amount>
+```
+
+Example:
+```bash
+node likwid-fi.js margin_quote ETH/LIKWID short 1 0.1
+```
+
+**Report to human:**
+
+> **Margin Preview: Short LIKWID (Long ETH) | ETH/LIKWID | 1x**
+>
+> Margin: `0.1 ETH`
+> Total (Using Margin 1x): `0.0997 ETH`
+> Borrow Amount: `980.73 LIKWID`
+> Borrow APY: `5.00%`
+>
+> Initial Margin Level: `2.00`
+> Liquidation Margin Level: `1.17`
+> Liq.Price: `0.00017404 ETH per LIKWID`
+>
+> Max Margin (1x): `1.506 ETH`
+> Borrow Max Amount: `990.54 LIKWID` (includes 1% slippage)
+>
+> Proceed? (yes/no)
+
+**Wait for human confirmation before executing.**
+
+### Step 2: Open / Increase Position
+
+```bash
+node likwid-fi.js margin_open <pool> <direction> <leverage> <amount>
+```
+
+The command automatically:
+1. Queries the API for existing margin positions on the same pool
+2. If an existing position with the same direction exists → **increases** it (`margin()`)
+3. If no position exists → **opens** a new one (`addMargin()`)
+
+**After execution:**
+
+> **Margin Position Opened!**
+> Transaction: `<TX_HASH>`
+> Block: `<BLOCK_NUMBER>`
+
+Or on failure:
+
+> **Margin Open Failed:** `<ERROR_MESSAGE>`
+> No funds were spent.
+
+### Leverage & Max Margin
+
+| Leverage | Max Margin Ratio |
+|---|---|
+| 1x | 15% of pairReserve (capped by realReserve) |
+| 2x | 12% |
+| 3x | 9% |
+| 4x | 5% |
+| 5x | 1.7% |
+
+Higher leverage = smaller max position, higher liquidation risk.
+
+### Step 3: View Positions
+
+```bash
+node likwid-fi.js margin_positions <pool>
+```
+
+Shows all your margin positions on the given pool with real-time on-chain data.
+
+**Report to human:**
+
+> **Margin Positions: ETH/LIKWID** (Swap Fee: 0.30% Margin Fee: 0.30%)
+> Current Price: `0.00010066 ETH per LIKWID`
+>
+> **Position #20**
+> Short LIKWID · Long ETH
+> Margin Amount: `0.001 ETH`
+> Margin Total: `0.000997 ETH`
+> Debt: `9.9654 LIKWID`
+> Borrow APY: `5.00%`
+> Liq.Price: `0.00018217 ETH`
+> Cur.Price: `0.00010066 ETH`
+> Margin Level: `1.99`
+> Estimated PNL: `-0.00000902 ETH`
+
+Data source: API provides `tokenId` only; all other data (marginAmount, marginTotal, debtAmount, direction) is read on-chain via `getPositionState()`.
+
+**PNL Calculation:**
+- If debt currency ≠ price currency: `PNL = marginTotal - (debt × curPrice)`
+- If debt currency = price currency: `PNL = marginTotal - (debt × 1/curPrice)`
+
+---
+
+## 5. Error Handling
 
 When errors occur, **always inform the human clearly**. Never silently swallow errors.
 
@@ -360,7 +474,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 
 ---
 
-## 5. All Commands Reference
+## 6. All Commands Reference
 
 | Command | Description |
 |:---|:---|
@@ -374,6 +488,9 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `lp_positions <pool>` | Show your liquidity positions in a pool. |
 | `lp_remove <pool> [percent]` | Remove liquidity. Default: 100% (all). |
 | `create_pair <t0> <t1> <fee> <mfee>` | Create a new pool. Tokens by name. |
+| `margin_quote <pool> <dir> <lev> <amt>` | Preview margin position. |
+| `margin_open <pool> <dir> <lev> <amt>` | Open or increase margin position. |
+| `margin_positions <pool>` | Show your margin positions. |
 
 ### Arguments
 
@@ -389,10 +506,12 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `[slip]` | `1`, `0.5`, `3` | Slippage tolerance in % (default: `1`). |
 | `<t0>`, `<t1>` | `ETH`, `USDT`, ... | Token names from network config `tokens`. |
 | `<fee>`, `<mfee>` | `3000` | Fee in basis points (3000 = 0.30%). |
+| `<dir>` (margin) | `long`, `short` | Direction relative to currency1. |
+| `<lev>` | `1`-`5` | Leverage multiplier. |
 
 ---
 
-## 6. Adding New Networks
+## 7. Adding New Networks
 
 To add a new network, create a JSON file in `pools/<network>.json`:
 

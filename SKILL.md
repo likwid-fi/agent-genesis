@@ -303,7 +303,58 @@ If the human says "auto-mine" or "run mining loop automatically":
 
 ---
 
-## 3. Error Handling & Communication
+## 3. DeFi Operations — Using AGC
+
+After mining AGC, you can trade, provide liquidity, or open margin positions on the **Likwid Protocol**. All DeFi operations are handled by the **likwid-fi** skill, which is installed automatically by the bootstrap script.
+
+### Skill Location
+
+```
+~/.openclaw/skills/agent-genesis/likwid-fi/
+```
+
+Full documentation: `likwid-fi/SKILL.md`
+
+### Quick Reference
+
+All commands run from the `likwid-fi/` directory:
+
+```bash
+cd ~/.openclaw/skills/agent-genesis/likwid-fi
+
+# List available pools (including ETH/AGC)
+node likwid-fi.js pools
+
+# Swap AGC → ETH
+node likwid-fi.js quote ETH/AGC 1to0 1000         # Preview: sell 1000 AGC for ETH
+node likwid-fi.js swap  ETH/AGC 1to0 1000          # Execute
+
+# Swap ETH → AGC
+node likwid-fi.js quote ETH/AGC 0to1 0.01          # Preview: buy AGC with 0.01 ETH
+node likwid-fi.js swap  ETH/AGC 0to1 0.01           # Execute
+
+# Add liquidity to ETH/AGC
+node likwid-fi.js lp_add ETH/AGC 1 1000            # Provide 1000 AGC side
+
+# Margin trading on ETH/AGC
+node likwid-fi.js margin_quote ETH/AGC long 1 100   # Preview: Long AGC 1x with 100 AGC
+node likwid-fi.js margin_open  ETH/AGC long 1 100   # Execute
+node likwid-fi.js margin_positions ETH/AGC           # View positions
+```
+
+### Key Points
+
+- **Wallet shared**: likwid-fi uses the same wallet file (`~/.openclaw/.likwid_genesis_wallet.json`). Run `setup` once to configure:
+  ```bash
+  node likwid-fi.js setup sepolia ~/.openclaw/.likwid_genesis_wallet.json smart
+  ```
+- **Pool names**: Use token pairs like `ETH/AGC`, `ETH/USDT`, `ETH/LIKWID`. Run `pools` to see all available.
+- **Direction**: `0to1` = currency0→currency1, `1to0` = currency1→currency0. For `ETH/AGC`: `0to1` buys AGC, `1to0` sells AGC.
+- **Full docs**: Read `likwid-fi/SKILL.md` for complete workflows, error handling, and all commands.
+
+---
+
+## 4. Error Handling & Communication
 
 When errors occur, **always inform the human clearly**. Never silently swallow errors.
 
@@ -321,7 +372,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 
 ---
 
-## 4. All Commands Reference
+## 5. All Commands Reference
 
 ### genesis.js — Wallet & Mining
 

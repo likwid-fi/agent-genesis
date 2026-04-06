@@ -19,4 +19,7 @@ cd "$TARGET_DIR"
 echo "[agent-genesis] Installing runtime dependencies..."
 npm install --legacy-peer-deps --no-audit --no-fund --omit=dev --omit=optional
 
+echo "[agent-genesis] Installing likwid-fi dependencies..."
+cd "$TARGET_DIR/likwid-fi" && npm install --no-audit --no-fund --omit=dev --omit=optional
+
 echo "[agent-genesis] Ready. Example: node genesis.js check_wallet"
