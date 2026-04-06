@@ -1290,21 +1290,21 @@ async function computeMarginPreview(publicClient, netConfig, pool, poolId, margi
   const maxMargin = fromPair < realReserve ? fromPair : realReserve;
   const minMargin = pairReserve / MARGIN_MINIMUM_RATIO;
 
-  // 3. Borrow quote: convert marginAmount * leverage to borrow currency
-  const zeroForOne = !marginForOne;
-  const quoteInput = marginAmount * BigInt(leverageInt);
+  // 3. Borrow quote: use getAmountIn to match contract's SwapMath.getAmountIn
+  //    "To produce marginTotal of margin currency, how much borrow currency is needed?"
+  const marginTotal = marginAmount * BigInt(leverageInt);
   const quoteResult = await publicClient.readContract({
     address: helperAddr, abi: helperABI,
-    functionName: "getAmountOut", args: [poolId, zeroForOne, quoteInput, true],
+    functionName: "getAmountIn", args: [poolId, marginForOne, marginTotal, true],
   });
   const borrowAmount = quoteResult[0];
   const swapFee = quoteResult[1];
   const swapFeeAmount = quoteResult[2];
   const borrowAmountMax = borrowAmount * 101n / 100n; // +1% slippage
 
-  // 4. Total (Using Margin Lx) = marginAmount * leverage - swapFeeAmount (in margin currency)
-  // Fee is charged on the input side of the swap
-  const total = quoteInput - swapFeeAmount;
+  // 4. Total (Using Margin Lx) = marginTotal minus margin fee (in margin currency).
+  // Fee basis: 1_000_000 = 100% (e.g. marginFee 3000 = 0.30%).
+  const total = marginTotal - marginTotal * BigInt(pool.marginFee) / 1_000_000n;
 
   // 5. Borrow APR
   const borrowForOne = !marginForOne;
@@ -1321,7 +1321,7 @@ async function computeMarginPreview(publicClient, netConfig, pool, poolId, margi
   // debtValue in margin currency: use getAmountIn to price borrowAmount
   const debtQuote = await publicClient.readContract({
     address: helperAddr, abi: helperABI,
-    functionName: "getAmountIn", args: [poolId, zeroForOne, borrowAmount, true],
+    functionName: "getAmountIn", args: [poolId, !marginForOne, borrowAmount, true],
   });
   const debtValueInMarginCurrency = debtQuote[0];
   const initialMarginLevel = Number(marginAmount + total) / Number(debtValueInMarginCurrency);
