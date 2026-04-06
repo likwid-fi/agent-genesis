@@ -254,13 +254,13 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
           method: "eth_estimateUserOperationGas",
           params: [userOperation, entryPointAddress],
         });
-        // Bundler under-estimates callGasLimit for state-dependent calls
-        // (e.g. exactOutput ETH refund via _clearNative). Apply 1.5x safety margin;
-        // unused gas is refunded by the Paymaster.
         return {
           preVerificationGas: BigInt(est.preVerificationGas),
           verificationGasLimit: BigInt(est.verificationGasLimit),
-          callGasLimit: BigInt(est.callGasLimit) * 3n / 2n,
+          // Bundler under-estimates callGasLimit for state-dependent calls
+          // (e.g. exactOutput ETH refund via _clearNative). Apply 2x safety margin
+          // with a 200k floor; unused gas is refunded.
+          callGasLimit: (() => { const g = BigInt(est.callGasLimit) * 2n; return g > 200000n ? g : 200000n; })(),
           paymasterVerificationGasLimit: est.paymasterVerificationGasLimit ? BigInt(est.paymasterVerificationGasLimit) : undefined,
           paymasterPostOpGasLimit: est.paymasterPostOpGasLimit ? BigInt(est.paymasterPostOpGasLimit) : undefined,
         };
