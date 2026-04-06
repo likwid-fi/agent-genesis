@@ -47,7 +47,7 @@ test -f ~/.openclaw/skills/agent-genesis/likwid-fi/likwid-fi.js && echo "skill p
 Run the bootstrap script to install or update everything in one shot:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/v2.0-dev/likwid-fi/bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/main/likwid-fi/bootstrap.sh)
 ```
 
 After bootstrap, all commands run from `~/.openclaw/skills/agent-genesis/likwid-fi/`.

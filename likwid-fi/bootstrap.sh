@@ -3,7 +3,7 @@ set -euo pipefail
 
 TARGET_DIR="${1:-$HOME/.openclaw/skills/agent-genesis}"
 REPO_URL="https://github.com/likwid-fi/agent-genesis.git"
-BRANCH="v2.0-dev"
+BRANCH="main"
 
 mkdir -p "$(dirname "$TARGET_DIR")"
 
