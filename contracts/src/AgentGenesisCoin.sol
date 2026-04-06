@@ -109,9 +109,6 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
 
         // --- Ecosystem Fund Setup ---
         ecosystemFundStartTime = block.timestamp;
-
-        // --- Initial Mining Reward Setup ---
-        // baseReward starts at 210M, which is part of the MINING_ALLOCATION.
     }
 
     // --- Admin ---

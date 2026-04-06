@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {BasePaymaster} from "@account-abstraction/contracts/core/BasePaymaster.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
+import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -81,6 +82,7 @@ contract AgentPaymaster is BasePaymaster {
 
     // --- Internal Functions ---
     function _slice(bytes memory data, uint256 start) internal pure returns (bytes memory) {
+        require(start <= data.length, "Paymaster: slice out of bounds");
         uint256 length = data.length - start;
         bytes memory result = new bytes(length);
         assembly {
@@ -167,8 +169,8 @@ contract AgentPaymaster is BasePaymaster {
         }
 
         // Mode 1 = Charge AGC
-        uint256 verificationGasLimit = uint128(uint256(userOp.accountGasLimits) >> 128);
-        require(verificationGasLimit > POST_OP_GAS, "Paymaster: gas too low for postOp");
+        uint256 postOpGasLimit = UserOperationLib.unpackPostOpGasLimit(userOp);
+        require(postOpGasLimit >= POST_OP_GAS, "Paymaster: postOp gas too low");
         require(cachedPairReserves != ReservesLibrary.ZERO_RESERVES, "Paymaster: reserves not initialized");
 
         // Calculate maxCost in AGC (currency1, so zeroForOne = false)
