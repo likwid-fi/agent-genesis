@@ -155,6 +155,23 @@ function resolveBundlerTransport(networkConfig) {
   return http(url);
 }
 
+function buildPaymasterMiddleware(networkConfig) {
+  if (process.env.LIKWID_NO_PAYMASTER === "1") return undefined;
+  const addr = networkConfig.paymaster;
+  if (!addr) return undefined;
+  const stub = {
+    paymaster: addr,
+    paymasterData: "0x",
+    verificationGasLimit: 600000n,
+    paymasterVerificationGasLimit: 600000n,
+    paymasterPostOpGasLimit: 600000n,
+  };
+  return {
+    getPaymasterStubData: async () => stub,
+    getPaymasterData: async () => stub,
+  };
+}
+
 // ======================= CLIENT SETUP =======================
 
 function createClients(config, networkConfig) {
@@ -222,6 +239,8 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
     },
   });
 
+  bundlerClient._paymaster = buildPaymasterMiddleware(networkConfig);
+
   return { smartAccount, bundlerClient, publicClient };
 }
 
@@ -252,20 +271,31 @@ async function buildApprovalCalls(publicClient, owner, tokenAddress, tokenSymbol
 
 async function submitUserOp(bundlerClient, calls, options = {}) {
   const sendArgs = { calls, ...options };
-  const hash = await bundlerClient.sendUserOperation(sendArgs);
-  console.log(`> UserOp submitted: ${hash}`);
-  console.log(`> Waiting for receipt...`);
-  const receipt = await bundlerClient.waitForUserOperationReceipt({ hash, timeout: 120_000 });
-  if (receipt.success) {
-    console.log(`> TX_OK`);
-    console.log(`> Transaction: ${receipt.receipt.transactionHash}`);
-    console.log(`> Block: ${receipt.receipt.blockNumber}`);
-    console.log(`> Gas used: ${receipt.actualGasUsed}`);
-    return true;
-  } else {
-    console.log(`> TX_REVERTED`);
-    console.log(`> Transaction: ${receipt.receipt?.transactionHash || "unknown"}`);
-    console.log(`> Reason: ${receipt.reason || "unknown"}`);
+  const usePaymaster = bundlerClient._paymaster && !options._skipPaymaster;
+  if (usePaymaster) sendArgs.paymaster = bundlerClient._paymaster;
+  try {
+    const hash = await bundlerClient.sendUserOperation(sendArgs);
+    console.log(`> UserOp submitted: ${hash}`);
+    console.log(`> Waiting for receipt...`);
+    const receipt = await bundlerClient.waitForUserOperationReceipt({ hash, timeout: 120_000 });
+    if (receipt.success) {
+      console.log(`> TX_OK`);
+      console.log(`> Transaction: ${receipt.receipt.transactionHash}`);
+      console.log(`> Block: ${receipt.receipt.blockNumber}`);
+      console.log(`> Gas used: ${receipt.actualGasUsed}`);
+      return true;
+    } else {
+      console.log(`> TX_REVERTED`);
+      console.log(`> Transaction: ${receipt.receipt?.transactionHash || "unknown"}`);
+      console.log(`> Reason: ${receipt.reason || "unknown"}`);
+      return false;
+    }
+  } catch (e) {
+    if (usePaymaster) {
+      console.log(`> Paymaster failed (${e.shortMessage || e.message}), retrying with direct gas...`);
+      return submitUserOp(bundlerClient, calls, { ...options, _skipPaymaster: true });
+    }
+    console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
     return false;
   }
 }

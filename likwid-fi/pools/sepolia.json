@@ -3,6 +3,7 @@
   "chainId": 11155111,
   "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
   "bundlerUrl": "https://api.candide.dev/public/v3/sepolia",
+  "paymaster": "0xdc78BA247821CDB0A3fe96EaDF4e20cEF86e5EDc",
   "contracts": {
     "LikwidVault": "0x315663A47d7E95c47370682DfF77415F469C3246",
     "LikwidPairPosition": "0xA8296e28c62249f89188De0499a81d6AD993a515",
@@ -24,7 +25,7 @@
       "decimals": 18
     },
     "AGC": {
-      "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+      "address": "0x7262bA32E60702cFc388D93c3366485539eD79bB",
       "decimals": 18
     }
   },
@@ -73,154 +74,6 @@
         },
         "fee": 5000,
         "marginFee": 5000
-      }
-    ],
-    "ETH/AGC": [
-      {
-        "currency0": {
-          "address": "0x0000000000000000000000000000000000000000",
-          "symbol": "ETH",
-          "decimals": 18
-        },
-        "currency1": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "fee": 3000,
-        "marginFee": 3000
-      },
-      {
-        "currency0": {
-          "address": "0x0000000000000000000000000000000000000000",
-          "symbol": "ETH",
-          "decimals": 18
-        },
-        "currency1": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "fee": 5000,
-        "marginFee": 5000
-      }
-    ],
-    "USDT/LIKWID": [
-      {
-        "currency0": {
-          "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89",
-          "symbol": "USDT",
-          "decimals": 6
-        },
-        "currency1": {
-          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
-          "symbol": "LIKWID",
-          "decimals": 18
-        },
-        "fee": 3000,
-        "marginFee": 3000
-      }
-    ],
-    "USDT/AGC": [
-      {
-        "currency0": {
-          "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89",
-          "symbol": "USDT",
-          "decimals": 6
-        },
-        "currency1": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "fee": 3000,
-        "marginFee": 3000
-      },
-      {
-        "currency0": {
-          "address": "0x4f0ab5c9630707d47c9d07c0ff143b7ba1c99b89",
-          "symbol": "USDT",
-          "decimals": 6
-        },
-        "currency1": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "fee": 5000,
-        "marginFee": 5000
-      }
-    ],
-    "AGC/LIKWID": [
-      {
-        "currency0": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "currency1": {
-          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
-          "symbol": "LIKWID",
-          "decimals": 18
-        },
-        "fee": 3000,
-        "marginFee": 3000
-      },
-      {
-        "currency0": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "currency1": {
-          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
-          "symbol": "LIKWID",
-          "decimals": 18
-        },
-        "fee": 5000,
-        "marginFee": 5000
-      },
-      {
-        "currency0": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "currency1": {
-          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
-          "symbol": "LIKWID",
-          "decimals": 18
-        },
-        "fee": 9395,
-        "marginFee": 9395
-      },
-      {
-        "currency0": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "currency1": {
-          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
-          "symbol": "LIKWID",
-          "decimals": 18
-        },
-        "fee": 9554,
-        "marginFee": 9554
-      },
-      {
-        "currency0": {
-          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
-          "symbol": "AGC",
-          "decimals": 18
-        },
-        "currency1": {
-          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
-          "symbol": "LIKWID",
-          "decimals": 18
-        },
-        "fee": 9697,
-        "marginFee": 9697
       }
     ]
   }
