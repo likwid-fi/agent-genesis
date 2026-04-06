@@ -161,9 +161,9 @@ Or on failure:
 
 ---
 
-## 2. Add Liquidity
+## 2. Add / Increase Liquidity
 
-Provide liquidity to a Likwid pool and receive an LP position (ERC-721 NFT).
+Provide liquidity to a Likwid pool. If you already have a position in the pool, the command automatically uses `increaseLiquidity` (adds to the existing NFT). Otherwise it creates a new LP position (ERC-721 NFT) via `addLiquidity`.
 
 ### Step 1: Select Pool & Check State
 
@@ -195,10 +195,11 @@ node likwid-fi.js lp_add <pool> <currency> <amount> [slippage%]
 
 - `<currency>`: `0` for currency0, `1` for currency1
 - The other side is calculated proportionally from the on-chain reserve ratio
+- Existing positions are auto-detected via the Likwid API. If found, `increaseLiquidity` is used with the existing `tokenId`.
 
 **Report to human before execution:**
 
-> **Add Liquidity Preview:**
+> **Add Liquidity Preview:** (or **Increase Liquidity Preview** if existing position found)
 > Pool: `<NAME>` (fee: `<FEE>`%)
 > Rate: 1 `<SYMBOL0>` = `<RATE>` `<SYMBOL1>`
 > `<SYMBOL0>`: `<AMOUNT0>`
@@ -211,7 +212,7 @@ node likwid-fi.js lp_add <pool> <currency> <amount> [slippage%]
 
 **After execution:**
 
-> **Liquidity Added!**
+> **Liquidity Added!** (or **Liquidity Increased!**)
 > Transaction: `<TX_HASH>`
 > Block: `<BLOCK_NUMBER>`
 
@@ -219,6 +220,78 @@ Or on failure:
 
 > **Add Liquidity Failed:** `<ERROR_MESSAGE>`
 > No funds were spent.
+
+---
+
+## 2b. View Liquidity Positions
+
+View your LP positions in a specific pool.
+
+```bash
+node likwid-fi.js lp_positions <pool>
+```
+
+**Report to human:**
+
+> **Your Liquidity Positions:**
+>
+> Pool: `<NAME>`  Swap Fee: `<FEE>`%  Margin Fee: `<MARGIN_FEE>`%
+> Your Pool Share: `<SHARE>`%
+> `<SYMBOL0>`: `<AMOUNT0>`
+> `<SYMBOL1>`: `<AMOUNT1>`
+>
+> Tip: Use "lp_add" to increase liquidity, or "lp_remove" to remove liquidity.
+
+If no positions found:
+
+> No liquidity positions found for `<NAME>`.
+
+---
+
+## 2c. Remove Liquidity
+
+Remove liquidity from an existing LP position.
+
+### Step 1: Check Position
+
+```bash
+node likwid-fi.js lp_positions <pool>
+```
+
+Report the user's current position details (pool share, token amounts).
+
+### Step 2: Execute
+
+```bash
+node likwid-fi.js lp_remove <pool> [percentage]
+```
+
+- `[percentage]`: 1-100 (default: 100 = remove all liquidity)
+- The first position in the pool is used automatically
+
+**Report to human before execution:**
+
+> **Remove Liquidity Preview:**
+> Pool: `<NAME>` (fee: `<FEE>`%) — tokenId: `<TOKEN_ID>`
+> Removing: `<PERCENT>`% of liquidity
+> Est. `<SYMBOL0>`: `<AMOUNT0>`
+> Est. `<SYMBOL1>`: `<AMOUNT1>`
+> Slippage: 1%
+>
+> Proceed? (yes/no)
+
+**Wait for human confirmation before executing.**
+
+**After execution:**
+
+> **Liquidity Removed!**
+> Transaction: `<TX_HASH>`
+> Block: `<BLOCK_NUMBER>`
+
+Or on failure:
+
+> **Remove Liquidity Failed:** `<ERROR_MESSAGE>`
+> No funds were withdrawn.
 
 ---
 
@@ -297,7 +370,9 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `pool_info <pool>` | Query on-chain pool state (reserves, rate). |
 | `quote <pool> <dir> <amt>` | Get swap output estimate without executing. |
 | `swap <pool> <dir> <amt> [slip]` | Execute a swap. |
-| `lp_add <pool> <cur> <amt> [slip]` | Add liquidity. `<cur>`: `0` or `1`. |
+| `lp_add <pool> <cur> <amt> [slip]` | Add or increase liquidity. `<cur>`: `0` or `1`. |
+| `lp_positions <pool>` | Show your liquidity positions in a pool. |
+| `lp_remove <pool> [percent]` | Remove liquidity. Default: 100% (all). |
 | `create_pair <t0> <t1> <fee> <mfee>` | Create a new pool. Tokens by name. |
 
 ### Arguments

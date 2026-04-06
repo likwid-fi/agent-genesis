@@ -129,6 +129,19 @@ function isNative(address) {
   return address.toLowerCase() === NATIVE_ADDRESS.toLowerCase();
 }
 
+async function fetchLiquidityPositions(chainId, owner, poolId) {
+  const url = `https://api.likwid.fi/v1/margin/pool/liquidity/list?chainId=${chainId}&page=1&pageSize=5&owner=${owner}&poolId=${poolId}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data?.items || json.items || [];
+  } catch (e) {
+    console.log(`> Warning: Could not query positions API: ${e.message}`);
+    return [];
+  }
+}
+
 function resolveRpc(config, networkConfig) {
   if (process.env.RPC_URL) return http(process.env.RPC_URL);
   if (networkConfig.rpc) return http(networkConfig.rpc);
@@ -685,7 +698,15 @@ async function cmd_lp_add(poolStr, currencyStr, amountStr, slippageStr = "1") {
 
   const rate = Number(formatUnits(r1, pool.currency1.decimals)) / Number(formatUnits(r0, pool.currency0.decimals));
 
-  console.log(`> LP_ADD: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+  // --- Check for existing position ---
+  const positions = await fetchLiquidityPositions(netConfig.chainId, senderAddress, poolId);
+  const existingTokenId = positions.length > 0 ? BigInt(positions[0].tokenId) : null;
+
+  if (existingTokenId) {
+    console.log(`> LP_INCREASE: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%) — tokenId: ${existingTokenId}`);
+  } else {
+    console.log(`> LP_ADD: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+  }
   console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
   console.log(`> ${pool.currency0.symbol}: ${formatUnits(amount0, pool.currency0.decimals)}`);
   console.log(`> ${pool.currency1.symbol}: ${formatUnits(amount1, pool.currency1.decimals)}`);
@@ -706,25 +727,216 @@ async function cmd_lp_add(poolStr, currencyStr, amountStr, slippageStr = "1") {
     calls.push(...await buildApprovalCalls(publicClient, senderAddress, pool.currency1.address, pool.currency1.symbol, pairPositionAddress, amount1));
   }
 
-  // Build PoolKey struct
-  const poolKey = {
-    currency0: pool.currency0.address,
-    currency1: pool.currency1.address,
-    fee: pool.fee,
-    marginFee: pool.marginFee,
-  };
-
   const nativeValue = (native0 ? amount0 : 0n) + (native1 ? amount1 : 0n);
 
-  calls.push({
+  if (existingTokenId) {
+    calls.push({
+      to: pairPositionAddress,
+      value: nativeValue,
+      data: encodeFunctionData({
+        abi: pairPositionABI,
+        functionName: "increaseLiquidity",
+        args: [existingTokenId, amount0, amount1, amount0Min, amount1Min, deadline],
+      }),
+    });
+  } else {
+    const poolKey = {
+      currency0: pool.currency0.address,
+      currency1: pool.currency1.address,
+      fee: pool.fee,
+      marginFee: pool.marginFee,
+    };
+    calls.push({
+      to: pairPositionAddress,
+      value: nativeValue,
+      data: encodeFunctionData({
+        abi: pairPositionABI,
+        functionName: "addLiquidity",
+        args: [poolKey, senderAddress, amount0, amount1, amount0Min, amount1Min, deadline],
+      }),
+    });
+  }
+
+  await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
+}
+
+// ======================= LP POSITIONS =======================
+
+async function cmd_lp_positions(poolStr) {
+  if (!poolStr) {
+    console.log(`> Usage: lp_positions <pool>`);
+    console.log(`> Pool: token pair (e.g. ETH/USDT)`);
+    return;
+  }
+
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, publicClient, senderAddress } = ctx;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
+
+  const positions = await fetchLiquidityPositions(netConfig.chainId, senderAddress, poolId);
+  if (positions.length === 0) {
+    console.log(`> No liquidity positions found for ${poolName}.`);
+    return;
+  }
+
+  const helperABI = loadABI("LikwidHelper");
+  const pairPositionABI = loadABI("LikwidPairPosition");
+
+  // Query pool state once (shared across all positions)
+  let stateInfo;
+  try {
+    stateInfo = await publicClient.readContract({
+      address: netConfig.contracts.LikwidHelper,
+      abi: helperABI,
+      functionName: "getPoolStateInfo",
+      args: [poolId],
+    });
+  } catch (e) {
+    return console.log(`> ERROR: Could not query pool state: ${e.shortMessage || e.message}`);
+  }
+
+  const totalSupply = stateInfo.totalSupply;
+  const r0 = stateInfo.pairReserve0;
+  const r1 = stateInfo.pairReserve1;
+
+  console.log(`> Your Liquidity Positions:`);
+  console.log(`>`);
+
+  for (const item of positions) {
+    const tokenId = BigInt(item.tokenId);
+
+    let posState;
+    try {
+      posState = await publicClient.readContract({
+        address: netConfig.contracts.LikwidPairPosition,
+        abi: pairPositionABI,
+        functionName: "getPositionState",
+        args: [tokenId],
+      });
+    } catch (e) {
+      console.log(`> ERROR: Could not query position #${tokenId}: ${e.shortMessage || e.message}`);
+      continue;
+    }
+
+    const liquidity = posState.liquidity;
+    const poolShare = totalSupply > 0n ? Number(liquidity) / Number(totalSupply) : 0;
+    const amount0 = totalSupply > 0n ? (r0 * liquidity) / totalSupply : 0n;
+    const amount1 = totalSupply > 0n ? (r1 * liquidity) / totalSupply : 0n;
+
+    console.log(`>   Pool: ${poolName}  Swap Fee: ${(pool.fee / 10000).toFixed(2)}%  Margin Fee: ${(pool.marginFee / 10000).toFixed(2)}%`);
+    console.log(`>   Your Pool Share: ${(poolShare * 100).toFixed(2)}%`);
+    console.log(`>   ${pool.currency0.symbol}: ${formatUnits(amount0, pool.currency0.decimals)}`);
+    console.log(`>   ${pool.currency1.symbol}: ${formatUnits(amount1, pool.currency1.decimals)}`);
+    console.log(`>`);
+  }
+
+  console.log(`>   Tip: Use "lp_add" to increase liquidity, or "lp_remove" to remove liquidity.`);
+}
+
+// ======================= REMOVE LIQUIDITY =======================
+
+async function cmd_lp_remove(poolStr, percentStr = "100") {
+  if (!poolStr) {
+    console.log(`> Usage: lp_remove <pool> [percentage]`);
+    console.log(`> Pool: token pair (e.g. ETH/USDT)`);
+    console.log(`> Percentage: 1-100 (default: 100 = remove all)`);
+    return;
+  }
+
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
+
+  const positions = await fetchLiquidityPositions(netConfig.chainId, senderAddress, poolId);
+  if (positions.length === 0) {
+    console.log(`> ERROR: No liquidity position found for ${poolName}. Nothing to remove.`);
+    return;
+  }
+
+  const tokenId = BigInt(positions[0].tokenId);
+  const pairPositionABI = loadABI("LikwidPairPosition");
+  const helperABI = loadABI("LikwidHelper");
+
+  // Query position state on-chain
+  let posState;
+  try {
+    posState = await publicClient.readContract({
+      address: netConfig.contracts.LikwidPairPosition,
+      abi: pairPositionABI,
+      functionName: "getPositionState",
+      args: [tokenId],
+    });
+  } catch (e) {
+    return console.log(`> ERROR: Could not query position state: ${e.shortMessage || e.message}`);
+  }
+
+  const totalLiquidity = posState.liquidity;
+  if (totalLiquidity === 0n) {
+    console.log(`> ERROR: Position #${tokenId} has zero liquidity.`);
+    return;
+  }
+
+  const percent = BigInt(percentStr);
+  if (percent < 1n || percent > 100n) {
+    return console.log(`> ERROR: Percentage must be between 1 and 100.`);
+  }
+
+  const liquidityToRemove = (totalLiquidity * percent) / 100n;
+
+  // Query pool reserves to estimate output
+  let stateInfo;
+  try {
+    stateInfo = await publicClient.readContract({
+      address: netConfig.contracts.LikwidHelper,
+      abi: helperABI,
+      functionName: "getPoolStateInfo",
+      args: [poolId],
+    });
+  } catch (e) {
+    return console.log(`> ERROR: Could not query pool state: ${e.shortMessage || e.message}`);
+  }
+
+  const totalSupply = stateInfo.totalSupply;
+  const r0 = stateInfo.pairReserve0;
+  const r1 = stateInfo.pairReserve1;
+
+  const estAmount0 = totalSupply > 0n ? (r0 * liquidityToRemove) / totalSupply : 0n;
+  const estAmount1 = totalSupply > 0n ? (r1 * liquidityToRemove) / totalSupply : 0n;
+
+  const slippage = 1n; // 1% default
+  const amount0Min = (estAmount0 * (100n - slippage)) / 100n;
+  const amount1Min = (estAmount1 * (100n - slippage)) / 100n;
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+
+  console.log(`> LP_REMOVE: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%) — tokenId: ${tokenId}`);
+  console.log(`> Removing: ${percentStr}% of liquidity`);
+  console.log(`> Est. ${pool.currency0.symbol}: ${formatUnits(estAmount0, pool.currency0.decimals)}`);
+  console.log(`> Est. ${pool.currency1.symbol}: ${formatUnits(estAmount1, pool.currency1.decimals)}`);
+  console.log(`> Slippage: 1%`);
+  console.log(`> Sender: ${senderAddress}`);
+
+  const pairPositionAddress = netConfig.contracts.LikwidPairPosition;
+  const calls = [{
     to: pairPositionAddress,
-    value: nativeValue,
+    value: 0n,
     data: encodeFunctionData({
       abi: pairPositionABI,
-      functionName: "addLiquidity",
-      args: [poolKey, senderAddress, amount0, amount1, amount0Min, amount1Min, deadline],
+      functionName: "removeLiquidity",
+      args: [tokenId, liquidityToRemove, amount0Min, amount1Min, deadline],
     }),
-  });
+  }];
 
   await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
 }
@@ -929,7 +1141,9 @@ Pool Info:
 
 DeFi Actions:
   swap <pool> <dir> <amount> [slippage%]    Execute swap.
-  lp_add <pool> <currency> <amt> [slip%]    Add liquidity. currency: 0 or 1.
+  lp_add <pool> <currency> <amt> [slip%]    Add or increase liquidity. currency: 0 or 1.
+  lp_positions <pool>                       Show your liquidity positions.
+  lp_remove <pool> [percent]                Remove liquidity. Default: 100% (all).
   create_pair <t0> <t1> <fee> <marginFee>   Create a new pool. Tokens by name or address.
 
 Arguments:
@@ -964,6 +1178,12 @@ Arguments:
           break;
         case "lp_add":
           await cmd_lp_add(args[1], args[2], args[3], args[4]);
+          break;
+        case "lp_positions":
+          await cmd_lp_positions(args[1]);
+          break;
+        case "lp_remove":
+          await cmd_lp_remove(args[1], args[2]);
           break;
         case "create_pair":
           await cmd_create_pair(args[1], args[2], args[3], args[4]);

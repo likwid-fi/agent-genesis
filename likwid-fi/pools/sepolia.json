@@ -179,6 +179,48 @@
         },
         "fee": 5000,
         "marginFee": 5000
+      },
+      {
+        "currency0": {
+          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+          "symbol": "AGC",
+          "decimals": 18
+        },
+        "currency1": {
+          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
+          "symbol": "LIKWID",
+          "decimals": 18
+        },
+        "fee": 9395,
+        "marginFee": 9395
+      },
+      {
+        "currency0": {
+          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+          "symbol": "AGC",
+          "decimals": 18
+        },
+        "currency1": {
+          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
+          "symbol": "LIKWID",
+          "decimals": 18
+        },
+        "fee": 9554,
+        "marginFee": 9554
+      },
+      {
+        "currency0": {
+          "address": "0x83738CCFcd130714ceE2c8805122b820F2Ac3a2F",
+          "symbol": "AGC",
+          "decimals": 18
+        },
+        "currency1": {
+          "address": "0x9e32a617b6c4cf17ed33393a85840fb245c1aa13",
+          "symbol": "LIKWID",
+          "decimals": 18
+        },
+        "fee": 9697,
+        "marginFee": 9697
       }
     ]
   }
