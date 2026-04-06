@@ -1,5 +1,4 @@
 {
   "network": "sepolia",
-  "keyFilePath": "~/.openclaw/.likwid_genesis_wallet.json",
-  "accountType": "smart"
+  "keyFilePath": "~/.openclaw/.likwid_genesis_wallet.json"
 }

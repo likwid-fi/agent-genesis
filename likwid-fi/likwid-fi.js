@@ -6,7 +6,7 @@
  * No dependency on agent-genesis — fully independent.
  *
  * Commands:
- *   setup <network> <keyFilePath> <accountType>
+ *   setup <network> <keyFilePath>
  *   account
  *   pools
  *   quote <poolIndex> <direction> <amount>
@@ -249,22 +249,6 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
           maxPriorityFeePerGas: fees.maxPriorityFeePerGas > floor ? fees.maxPriorityFeePerGas : floor,
         };
       },
-      async estimateUserOperationGas({ bundlerClient, userOperation, entryPointAddress }) {
-        const est = await bundlerClient.request({
-          method: "eth_estimateUserOperationGas",
-          params: [userOperation, entryPointAddress],
-        });
-        return {
-          preVerificationGas: BigInt(est.preVerificationGas),
-          verificationGasLimit: BigInt(est.verificationGasLimit),
-          // Bundler under-estimates callGasLimit for state-dependent calls
-          // (e.g. exactOutput ETH refund via _clearNative). Apply 2x safety margin
-          // with a 200k floor; unused gas is refunded.
-          callGasLimit: (() => { const g = BigInt(est.callGasLimit) * 2n; return g > 200000n ? g : 200000n; })(),
-          paymasterVerificationGasLimit: est.paymasterVerificationGasLimit ? BigInt(est.paymasterVerificationGasLimit) : undefined,
-          paymasterPostOpGasLimit: est.paymasterPostOpGasLimit ? BigInt(est.paymasterPostOpGasLimit) : undefined,
-        };
-      },
     },
   });
 
@@ -300,8 +284,14 @@ async function buildApprovalCalls(publicClient, owner, tokenAddress, tokenSymbol
 
 async function submitUserOp(bundlerClient, calls, options = {}) {
   const sendArgs = { calls, ...options };
-  const usePaymaster = bundlerClient._paymaster && !options._skipPaymaster;
-  if (usePaymaster) sendArgs.paymaster = bundlerClient._paymaster;
+  sendArgs.paymaster = bundlerClient._paymaster;
+
+  // Estimate gas first, then bump callGasLimit to handle state-dependent
+  // under-estimation (e.g. exactOutput ETH refund). Unused gas is refunded.
+  const est = await bundlerClient.estimateUserOperationGas(sendArgs);
+  const callGasFloor = 400000n;
+  sendArgs.callGasLimit = est.callGasLimit > callGasFloor ? est.callGasLimit : callGasFloor;
+
   try {
     const hash = await bundlerClient.sendUserOperation(sendArgs);
     console.log(`> UserOp submitted: ${hash}`);
@@ -320,12 +310,8 @@ async function submitUserOp(bundlerClient, calls, options = {}) {
       return false;
     }
   } catch (e) {
-    if (usePaymaster) {
-      console.log(`> Paymaster failed (${e.shortMessage || e.message}), retrying with direct gas...`);
-      return submitUserOp(bundlerClient, calls, { ...options, _skipPaymaster: true });
-    }
-    console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
-    return false;
+    console.log(`> Paymaster UserOp failed (${e.shortMessage || e.message}), falling back to direct tx...`);
+    throw { _paymasterFailed: true, cause: e };
   }
 }
 
@@ -344,78 +330,93 @@ async function getEip7702Authorization(publicClient, walletClient, implementatio
   });
 }
 
-async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) {
-  if (config.accountType === "smart") {
-    const { smartAccount, bundlerClient } = await getSmartAccount(config, netConfig, eoaAccount);
+function _usePaymaster(netConfig) {
+  return process.env.LIKWID_NO_PAYMASTER !== "1" && !!netConfig.paymaster && !!netConfig.bundlerUrl;
+}
 
-    // Sign EIP-7702 authorization if EOA hasn't been delegated yet
-    const chain = CHAINS[config.network];
-    const walletClient = createWalletClient({
-      account: eoaAccount, chain,
-      transport: resolveRpc(config, netConfig),
-    });
-    const authorization = await getEip7702Authorization(publicClient, walletClient, smartAccount.authorization.address);
-    const userOpOptions = authorization ? { authorization } : {};
-
-    // Non-standard ERC-20 tokens (e.g. USDT) can fail when approve + swap are
-    // batched in a single executeBatch. Split approvals into a separate UserOp.
-    const approvalCalls = calls.filter(c => c._isApproval);
-    const actionCalls = calls.filter(c => !c._isApproval);
-
+async function _executeEOA(config, netConfig, eoaAccount, publicClient, calls) {
+  const chain = CHAINS[config.network];
+  const walletClient = createWalletClient({
+    account: eoaAccount, chain,
+    transport: resolveRpc(config, netConfig),
+  });
+  console.log(`> Submitting ${calls.length} transaction${calls.length > 1 ? "s" : ""} (direct)...`);
+  for (const call of calls) {
     try {
-      if (approvalCalls.length > 0 && actionCalls.length > 0) {
-        console.log(`> Submitting approvals (${approvalCalls.length} call${approvalCalls.length > 1 ? "s" : ""})...`);
-        const ok = await submitUserOp(bundlerClient, approvalCalls, userOpOptions);
-        if (!ok) return false;
-        console.log(`> Submitting action (${actionCalls.length} call${actionCalls.length > 1 ? "s" : ""})...`);
-        const ok2 = await submitUserOp(bundlerClient, actionCalls);
-        if (!ok2) return false;
-      } else {
-        console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
-        const ok = await submitUserOp(bundlerClient, calls, userOpOptions);
-        if (!ok) return false;
-      }
-      return true;
-    } catch (e) {
-      console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
-      return false;
-    }
-  } else {
-    // --- EOA: execute calls sequentially ---
-    const chain = CHAINS[config.network];
-    const walletClient = createWalletClient({
-      account: eoaAccount, chain,
-      transport: resolveRpc(config, netConfig),
-    });
-    console.log(`> Submitting ${calls.length} transaction${calls.length > 1 ? "s" : ""}...`);
-    for (const call of calls) {
-      try {
-        const txHash = await walletClient.sendTransaction({
-          to: call.to, value: call.value, data: call.data,
-        });
-        console.log(`> Tx submitted: ${txHash}`);
-        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-        if (receipt.status !== "success") {
-          console.log(`> TX_REVERTED: ${txHash}`);
-          return false;
-        }
-      } catch (e) {
-        console.log(`> ERROR: Transaction failed: ${e.shortMessage || e.message}`);
+      // Estimate gas with 50% buffer — default estimation is often too tight
+      // for DeFi calls with state-dependent execution paths.
+      const gasEstimate = await publicClient.estimateGas({
+        account: eoaAccount, to: call.to, value: call.value, data: call.data,
+      });
+      const txHash = await walletClient.sendTransaction({
+        to: call.to, value: call.value, data: call.data,
+        gas: gasEstimate * 3n / 2n,
+      });
+      console.log(`> Tx submitted: ${txHash}`);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      if (receipt.status !== "success") {
+        console.log(`> TX_REVERTED: ${txHash}`);
         return false;
       }
+    } catch (e) {
+      console.log(`> ERROR: Transaction failed: ${e.shortMessage || e.message}`);
+      return false;
     }
-    console.log(`> TX_OK`);
+  }
+  console.log(`> TX_OK`);
+  return true;
+}
+
+async function executeCalls(config, netConfig, eoaAccount, publicClient, calls) {
+  if (!_usePaymaster(netConfig)) {
+    return _executeEOA(config, netConfig, eoaAccount, publicClient, calls);
+  }
+
+  // --- Smart Account + Paymaster path ---
+  const { smartAccount, bundlerClient } = await getSmartAccount(config, netConfig, eoaAccount);
+
+  const chain = CHAINS[config.network];
+  const walletClient = createWalletClient({
+    account: eoaAccount, chain,
+    transport: resolveRpc(config, netConfig),
+  });
+  const authorization = await getEip7702Authorization(publicClient, walletClient, smartAccount.authorization.address);
+  const userOpOptions = authorization ? { authorization } : {};
+
+  // Non-standard ERC-20 tokens (e.g. USDT) can fail when approve + swap are
+  // batched in a single executeBatch. Split approvals into a separate UserOp.
+  const approvalCalls = calls.filter(c => c._isApproval);
+  const actionCalls = calls.filter(c => !c._isApproval);
+
+  try {
+    if (approvalCalls.length > 0 && actionCalls.length > 0) {
+      console.log(`> Submitting approvals (${approvalCalls.length} call${approvalCalls.length > 1 ? "s" : ""})...`);
+      const ok = await submitUserOp(bundlerClient, approvalCalls, userOpOptions);
+      if (!ok) return false;
+      console.log(`> Submitting action (${actionCalls.length} call${actionCalls.length > 1 ? "s" : ""})...`);
+      const ok2 = await submitUserOp(bundlerClient, actionCalls);
+      if (!ok2) return false;
+    } else {
+      console.log(`> Submitting UserOperation (${calls.length} call${calls.length > 1 ? "s" : ""})...`);
+      const ok = await submitUserOp(bundlerClient, calls, userOpOptions);
+      if (!ok) return false;
+    }
     return true;
+  } catch (e) {
+    if (e._paymasterFailed) {
+      return _executeEOA(config, netConfig, eoaAccount, publicClient, calls);
+    }
+    console.log(`> ERROR: UserOp failed: ${e.shortMessage || e.message}`);
+    return false;
   }
 }
 
 // ======================= COMMANDS =======================
 
-async function cmd_setup(network, keyFilePath, accountType = "eoa") {
+async function cmd_setup(network, keyFilePath) {
   if (!network || !keyFilePath) {
-    console.log(`> Usage: setup <network> <keyFilePath> [accountType]`);
+    console.log(`> Usage: setup <network> <keyFilePath>`);
     console.log(`> Networks: sepolia, ethereum, base`);
-    console.log(`> Account types: eoa (default), smart`);
     return;
   }
 
@@ -432,18 +433,14 @@ async function cmd_setup(network, keyFilePath, accountType = "eoa") {
 
   const account = privateKeyToAccount(privateKey);
 
-  const cfg = { network, keyFilePath: collapseHome(path.resolve(expandHome(keyFilePath))), accountType: accountType.toLowerCase() };
+  const cfg = { network, keyFilePath: collapseHome(path.resolve(expandHome(keyFilePath))) };
   saveConfig(cfg);
 
   console.log(`> SETUP_OK`);
   console.log(`> Network: ${netConfig.network} (Chain ID ${netConfig.chainId})`);
-  console.log(`> EOA Address: ${account.address}`);
-  console.log(`> Account Type: ${cfg.accountType.toUpperCase()}`);
+  console.log(`> Address: ${account.address}`);
   console.log(`> Key File: ${cfg.keyFilePath}`);
-
-  if (cfg.accountType === "smart") {
-    console.log(`> Smart Account: ${account.address} (EIP-7702, same as EOA)`);
-  }
+  console.log(`> Gas Mode: ${_usePaymaster(netConfig) ? "Paymaster (AGC)" : "Direct (ETH)"}`);
 }
 
 async function cmd_account() {
@@ -463,14 +460,13 @@ async function cmd_account() {
 
   console.log(`> ACCOUNT_INFO`);
   console.log(`> Network: ${netConfig.network} (Chain ID ${netConfig.chainId})`);
-  console.log(`> Account Type: ${config.accountType.toUpperCase()}`);
-  console.log(`> EOA Address: ${account.address}`);
+  console.log(`> Address: ${account.address}`);
 
   const ethBalance = await publicClient.getBalance({ address: account.address });
-  console.log(`> EOA ETH Balance: ${formatUnits(ethBalance, 18)} ETH`);
-
-  if (config.accountType === "smart") {
-    console.log(`> Mode: EIP-7702 (EOA = Smart Account)`);
+  console.log(`> ETH Balance: ${formatUnits(ethBalance, 18)} ETH`);
+  console.log(`> Gas Mode: ${_usePaymaster(netConfig) ? "Paymaster (AGC)" : "Direct (ETH)"}`);
+  if (_usePaymaster(netConfig)) {
+    console.log(`> EIP-7702 Smart Account (EOA = Smart Account)`);
   }
 }
 
@@ -643,7 +639,7 @@ async function cmd_swap(poolStr, direction, amountStr, slippageStr = "1") {
     console.log(`> Estimated cost: ~${formatUnits(amountIn, fromToken.decimals)} ${fromToken.symbol}`);
     console.log(`> Max cost (${slippageStr}% slippage): ${formatUnits(amountInMax, fromToken.decimals)} ${fromToken.symbol}`);
     console.log(`> Sender: ${senderAddress}`);
-    console.log(`> Account Type: ${config.accountType.toUpperCase()}`);
+    console.log(`> Gas Mode: ${_usePaymaster(netConfig) ? "Paymaster (AGC)" : "Direct (ETH)"}`);
 
     const calls = [];
 
@@ -690,7 +686,7 @@ async function cmd_swap(poolStr, direction, amountStr, slippageStr = "1") {
     console.log(`> Estimated output: ~${formatUnits(amountOut, toToken.decimals)} ${toToken.symbol}`);
     console.log(`> Min output (${slippageStr}% slippage): ${formatUnits(amountOutMin, toToken.decimals)} ${toToken.symbol}`);
     console.log(`> Sender: ${senderAddress}`);
-    console.log(`> Account Type: ${config.accountType.toUpperCase()}`);
+    console.log(`> Gas Mode: ${_usePaymaster(netConfig) ? "Paymaster (AGC)" : "Direct (ETH)"}`);
 
     const calls = [];
 
@@ -1722,9 +1718,8 @@ if (require.main === module) {
 Usage: node likwid-fi.js <command> [args]
 
 Setup:
-  setup <network> <keyFile> [accountType]   Configure wallet and network.
+  setup <network> <keyFile>                 Configure wallet and network.
                                             Networks: sepolia, ethereum, base
-                                            Account types: eoa (default), smart
   account                                   Show current account info and balances.
 
 Pool Info:
@@ -1758,7 +1753,7 @@ Arguments:
     try {
       switch (command) {
         case "setup":
-          await cmd_setup(args[1], args[2], args[3]);
+          await cmd_setup(args[1], args[2]);
           break;
         case "account":
           await cmd_account();

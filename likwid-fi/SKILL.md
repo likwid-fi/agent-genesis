@@ -65,24 +65,21 @@ After bootstrap completes, ask the user for three things:
    >
    > **NEVER** ask the user to paste their private key directly. Always ask for the **file path**.
 
-3. **Account Type** — How do you want to interact with the protocol?
-   > `eoa` — Sign and send transactions directly from your EOA wallet.
-   > `smart` — Use an ERC-4337 Smart Account (via Permissionless). Transactions are submitted as UserOperations through a bundler.
-
 Then run:
 
 ```bash
-node likwid-fi.js setup <network> <keyFilePath> <accountType>
+node likwid-fi.js setup <network> <keyFilePath>
 ```
+
+Gas mode is auto-detected: if the network has a Paymaster configured, gas is paid in AGC via Smart Account (EIP-7702). Otherwise, direct EOA transactions pay gas in ETH. Use `LIKWID_NO_PAYMASTER=1` env var to force direct ETH mode.
 
 **Report to human:**
 
 > **Likwid.fi Skill Configured!**
 >
 > Network: `<NETWORK>` (Chain ID `<CHAIN_ID>`)
-> EOA Address: `<EOA_ADDRESS>`
-> Account Type: `<EOA|SMART>`
-> Smart Account: `<SMART_ADDRESS>` *(if smart)*
+> Address: `<ADDRESS>`
+> Gas Mode: `Paymaster (AGC)` or `Direct (ETH)`
 >
 > **CRITICAL:** Your private key is read from `<KEY_FILE>`. Never share this file.
 
@@ -482,14 +479,14 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 
 | Error Type | What to Tell the Human |
 |---|---|
-| **Not configured** | "Run setup first: `node likwid-fi.js setup <network> <keyFile> <accountType>`" |
+| **Not configured** | "Run setup first: `node likwid-fi.js setup <network> <keyFile>`" |
 | **Key file not found** | "Private key file not found at `<PATH>`. Please check the path." |
 | **Pool not found** | "Pool `<NAME>` not found. Use token pair (e.g. ETH/USDT). Run `pools` to list." |
 | **Quote failed** | "Could not get quote — pool may have insufficient liquidity." |
 | **Approval failed** | "Token approval failed. Swap was NOT executed." |
 | **Swap reverted** | "Swap transaction reverted. No funds were lost. Check slippage or try a smaller amount." |
 | **Insufficient balance** | "Insufficient `<TOKEN>` balance. You have `<BALANCE>`, need `<REQUIRED>`." |
-| **UserOp failed** | "Smart Account UserOperation failed: `<REASON>`. Try EOA mode or check bundler." |
+| **UserOp failed** | "Smart Account UserOperation failed: `<REASON>`. Falling back to direct transaction." |
 
 **Key principle:** If a multi-step operation fails at any step (e.g., approval fails before swap), **stop immediately** and report.
 
@@ -499,7 +496,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 
 | Command | Description |
 |:---|:---|
-| `setup <net> <key> [type]` | Configure network, wallet, and account type. |
+| `setup <net> <key>` | Configure network and wallet. Gas mode auto-detected. |
 | `account` | Show current account info and balances. |
 | `pools` | List available pools on the current network. |
 | `pool_info <pool>` | Query on-chain pool state (reserves, rate). |
@@ -519,7 +516,6 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 |:---|:---|:---|
 | `<net>` | `sepolia`, `ethereum`, `base` | Target network. |
 | `<key>` | File path | Path to file containing private key. |
-| `[type]` | `eoa`, `smart` | Account type (default: `eoa`). |
 | `<pool>` | `ETH/USDT`, `ETH-LIKWID` | Token pair. Lowest fee tier selected by default. |
 | `<dir>` | `sell0`, `sell1`, `buy0`, `buy1` | Swap direction. `sell0`/`sell1` = exact input, `buy0`/`buy1` = exact output. |
 | `<cur>` | `0`, `1` | Which currency to provide (other auto-calculated). |
@@ -564,5 +560,5 @@ To add a new network, create a JSON file in `pools/<network>.json`:
 
 Then switch to the new network:
 ```bash
-node likwid-fi.js setup <new_network> <keyFile> [accountType]
+node likwid-fi.js setup <new_network> <keyFile>
 ```
