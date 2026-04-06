@@ -4,6 +4,10 @@ pragma solidity ^0.8.28;
 import {Script, console} from "forge-std/Script.sol";
 import {AgentGenesisCoin} from "../src/AgentGenesisCoin.sol";
 import {AgentPaymaster, IEntryPoint} from "../src/AgentPaymaster.sol";
+import {IPairPositionManager} from "@likwid-fi/core/interfaces/IPairPositionManager.sol";
+import {IVault} from "@likwid-fi/core/interfaces/IVault.sol";
+import {PoolKey} from "@likwid-fi/core/types/PoolKey.sol";
+import {Currency, CurrencyLibrary} from "@likwid-fi/core/types/Currency.sol";
 
 // cast wallet sign --private-key $PRIVATE_KEY $(cast abi-encode --packed "f(address,uint256,uint256)" 0x35D3F3497eC612b3Dd982819F95cA98e6a404Ce1 100 1 | cast keccak)
 // forge script script/DeployGenesisSepolia.s.sol --broadcast --rpc-url https://sepolia.drpc.org --private-key $PRIVATE_KEY
@@ -30,6 +34,31 @@ contract DeployGenesisScript is Script {
 
         agc.setPaymaster(address(paymaster));
         console.log("Paymaster set in AGC");
+
+        // Initialize Pool (ETH/AGC)
+        IPairPositionManager pm = IPairPositionManager(likwidPairPosition);
+        IVault vault = pm.vault();
+        PoolKey memory poolKey = PoolKey({
+            currency0: CurrencyLibrary.ADDRESS_ZERO,
+            currency1: Currency.wrap(address(agc)),
+            fee: agc.POOL_FEE(),
+            marginFee: agc.POOL_MARGIN_FEE()
+        });
+        vault.initialize(poolKey);
+        console.log("Pool initialized");
+
+        // Add initial liquidity: 1 ETH = 1,000,000 AGC
+        uint256 ethAmount = 1 ether;
+        uint256 agcAmount = 1_000_000 ether;
+        agc.approve(address(pm), agcAmount);
+        (uint256 tokenId,) = pm.addLiquidity{value: ethAmount}(
+            poolKey, deployer, ethAmount, agcAmount, 0, 0, block.timestamp + 300
+        );
+        console.log("LP added, tokenId:", tokenId);
+
+        // Update Paymaster cached reserves after LP is added
+        paymaster.updateCachedReserves();
+        console.log("Paymaster cached reserves updated");
 
         // Fund Paymaster with 0.1 ETH (deposit for gas payments)
         (bool success,) = address(paymaster).call{value: 0.1 ether}("");
