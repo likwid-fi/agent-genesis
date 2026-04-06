@@ -249,6 +249,22 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
           maxPriorityFeePerGas: fees.maxPriorityFeePerGas > floor ? fees.maxPriorityFeePerGas : floor,
         };
       },
+      async estimateUserOperationGas({ bundlerClient, userOperation, entryPointAddress }) {
+        const est = await bundlerClient.request({
+          method: "eth_estimateUserOperationGas",
+          params: [userOperation, entryPointAddress],
+        });
+        // Bundler under-estimates callGasLimit for state-dependent calls
+        // (e.g. exactOutput ETH refund via _clearNative). Apply 1.5x safety margin;
+        // unused gas is refunded by the Paymaster.
+        return {
+          preVerificationGas: BigInt(est.preVerificationGas),
+          verificationGasLimit: BigInt(est.verificationGasLimit),
+          callGasLimit: BigInt(est.callGasLimit) * 3n / 2n,
+          paymasterVerificationGasLimit: est.paymasterVerificationGasLimit ? BigInt(est.paymasterVerificationGasLimit) : undefined,
+          paymasterPostOpGasLimit: est.paymasterPostOpGasLimit ? BigInt(est.paymasterPostOpGasLimit) : undefined,
+        };
+      },
     },
   });
 
@@ -484,11 +500,22 @@ async function cmd_pools() {
   });
 }
 
+// Parse swap direction: sell0/0to1, sell1/1to0 (exact input), buy0, buy1 (exact output)
+function parseSwapDirection(direction) {
+  if (direction === "sell0" || direction === "0to1") return { zeroForOne: true, exactOutput: false };
+  if (direction === "sell1" || direction === "1to0") return { zeroForOne: false, exactOutput: false };
+  if (direction === "buy1") return { zeroForOne: true, exactOutput: true };
+  if (direction === "buy0") return { zeroForOne: false, exactOutput: true };
+  return null;
+}
+
 async function cmd_quote(poolStr, direction, amountStr) {
   if (!poolStr || !direction || !amountStr) {
     console.log(`> Usage: quote <pool> <direction> <amount>`);
     console.log(`> Pool: token pair (e.g. ETH/USDT) — lowest fee tier selected by default`);
-    console.log(`> Direction: 0to1 (currency0 -> currency1) or 1to0 (currency1 -> currency0)`);
+    console.log(`> Direction: sell0 | sell1 (exact input)  buy0 | buy1 (exact output)`);
+    console.log(`> Examples: quote ETH/AGC sell0 0.001  (sell 0.001 ETH)`);
+    console.log(`>           quote ETH/AGC buy1 100     (buy 100 AGC)`);
     return;
   }
 
@@ -501,10 +528,12 @@ async function cmd_quote(poolStr, direction, amountStr) {
   const pool = resolvePool(netConfig, poolStr);
   if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
 
-  const zeroForOne = direction === "0to1";
+  const dir = parseSwapDirection(direction);
+  if (!dir) return console.log(`> ERROR: Invalid direction "${direction}". Use sell0, sell1, buy0, or buy1.`);
+
+  const { zeroForOne, exactOutput } = dir;
   const fromToken = zeroForOne ? pool.currency0 : pool.currency1;
   const toToken = zeroForOne ? pool.currency1 : pool.currency0;
-  const amountIn = parseUnits(amountStr, fromToken.decimals);
   const poolId = computePoolId(pool);
 
   const clients = createClients(config, netConfig);
@@ -513,22 +542,45 @@ async function cmd_quote(poolStr, direction, amountStr) {
   const helperABI = loadABI("LikwidHelper");
 
   try {
-    const result = await clients.publicClient.readContract({
-      address: netConfig.contracts.LikwidHelper,
-      abi: helperABI,
-      functionName: "getAmountOut",
-      args: [poolId, zeroForOne, amountIn, true],
-    });
+    if (exactOutput) {
+      // Exact output: user specifies desired output amount, calculate required input
+      const amountOut = parseUnits(amountStr, toToken.decimals);
+      const result = await clients.publicClient.readContract({
+        address: netConfig.contracts.LikwidHelper,
+        abi: helperABI,
+        functionName: "getAmountIn",
+        args: [poolId, zeroForOne, amountOut, true],
+      });
 
-    const amountOut = result[0] !== undefined ? result[0] : result;
-    const fee = result[1] !== undefined ? result[1] : 0;
-    const feeAmount = result[2] !== undefined ? result[2] : 0n;
+      const amountIn = result[0] !== undefined ? result[0] : result;
+      const fee = result[1] !== undefined ? result[1] : 0;
+      const feeAmount = result[2] !== undefined ? result[2] : 0n;
 
-    console.log(`> QUOTE`);
-    console.log(`> Pool: ${pool.currency0.symbol}/${pool.currency1.symbol} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
-    console.log(`> Input: ${amountStr} ${fromToken.symbol}`);
-    console.log(`> Output: ~${formatUnits(amountOut, toToken.decimals)} ${toToken.symbol}`);
-    console.log(`> Fee: ${(fee / 10000).toFixed(2)}% (${formatUnits(feeAmount, fromToken.decimals)} ${fromToken.symbol})`);
+      console.log(`> QUOTE (Exact Output)`);
+      console.log(`> Pool: ${pool.currency0.symbol}/${pool.currency1.symbol} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+      console.log(`> Buy: ${amountStr} ${toToken.symbol}`);
+      console.log(`> Cost: ~${formatUnits(amountIn, fromToken.decimals)} ${fromToken.symbol}`);
+      console.log(`> Fee: ${(fee / 10000).toFixed(2)}% (${formatUnits(feeAmount, fromToken.decimals)} ${fromToken.symbol})`);
+    } else {
+      // Exact input: user specifies input amount, calculate expected output
+      const amountIn = parseUnits(amountStr, fromToken.decimals);
+      const result = await clients.publicClient.readContract({
+        address: netConfig.contracts.LikwidHelper,
+        abi: helperABI,
+        functionName: "getAmountOut",
+        args: [poolId, zeroForOne, amountIn, true],
+      });
+
+      const amountOut = result[0] !== undefined ? result[0] : result;
+      const fee = result[1] !== undefined ? result[1] : 0;
+      const feeAmount = result[2] !== undefined ? result[2] : 0n;
+
+      console.log(`> QUOTE`);
+      console.log(`> Pool: ${pool.currency0.symbol}/${pool.currency1.symbol} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+      console.log(`> Input: ${amountStr} ${fromToken.symbol}`);
+      console.log(`> Output: ~${formatUnits(amountOut, toToken.decimals)} ${toToken.symbol}`);
+      console.log(`> Fee: ${(fee / 10000).toFixed(2)}% (${formatUnits(feeAmount, fromToken.decimals)} ${fromToken.symbol})`);
+    }
   } catch (e) {
     console.log(`> ERROR: Quote failed: ${e.shortMessage || e.message}`);
   }
@@ -538,8 +590,10 @@ async function cmd_swap(poolStr, direction, amountStr, slippageStr = "1") {
   if (!poolStr || !direction || !amountStr) {
     console.log(`> Usage: swap <pool> <direction> <amount> [slippage%]`);
     console.log(`> Pool: token pair (e.g. ETH/USDT) — lowest fee tier selected by default`);
-    console.log(`> Direction: 0to1 (currency0 -> currency1) or 1to0 (currency1 -> currency0)`);
+    console.log(`> Direction: sell0 | sell1 (exact input)  buy0 | buy1 (exact output)`);
     console.log(`> Default slippage: 1%`);
+    console.log(`> Examples: swap ETH/AGC sell0 0.001  (sell 0.001 ETH)`);
+    console.log(`>           swap ETH/AGC buy1 100     (buy 100 AGC)`);
     return;
   }
 
@@ -550,65 +604,115 @@ async function cmd_swap(poolStr, direction, amountStr, slippageStr = "1") {
   const pool = resolvePool(netConfig, poolStr);
   if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Use token pair (e.g. ETH/USDT). Run "pools" to list.`);
 
-  const zeroForOne = direction === "0to1";
+  const dir = parseSwapDirection(direction);
+  if (!dir) return console.log(`> ERROR: Invalid direction "${direction}". Use sell0, sell1, buy0, or buy1.`);
+
+  const { zeroForOne, exactOutput } = dir;
   const fromToken = zeroForOne ? pool.currency0 : pool.currency1;
   const toToken = zeroForOne ? pool.currency1 : pool.currency0;
-  const amountIn = parseUnits(amountStr, fromToken.decimals);
   const slippage = BigInt(slippageStr);
   const poolId = computePoolId(pool);
 
   const pairPositionABI = loadABI("LikwidPairPosition");
   const helperABI = loadABI("LikwidHelper");
-
-  // --- Quote ---
-  console.log(`> SWAP: ${amountStr} ${fromToken.symbol} -> ${toToken.symbol}`);
-
-  let amountOut;
-  try {
-    const result = await publicClient.readContract({
-      address: netConfig.contracts.LikwidHelper,
-      abi: helperABI,
-      functionName: "getAmountOut",
-      args: [poolId, zeroForOne, amountIn, true],
-    });
-    amountOut = result[0] !== undefined ? result[0] : result;
-  } catch (e) {
-    return console.log(`> ERROR: Quote failed: ${e.shortMessage || e.message}`);
-  }
-
-  const amountOutMin = (amountOut * (100n - slippage)) / 100n;
+  const pairPositionAddress = netConfig.contracts.LikwidPairPosition;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
 
-  console.log(`> Estimated output: ~${formatUnits(amountOut, toToken.decimals)} ${toToken.symbol}`);
-  console.log(`> Min output (${slippageStr}% slippage): ${formatUnits(amountOutMin, toToken.decimals)} ${toToken.symbol}`);
-  console.log(`> Sender: ${senderAddress}`);
-  console.log(`> Account Type: ${config.accountType.toUpperCase()}`);
+  if (exactOutput) {
+    // --- Exact Output: buy specific amount of toToken ---
+    const amountOut = parseUnits(amountStr, toToken.decimals);
 
-  // --- Build calls ---
-  const pairPositionAddress = netConfig.contracts.LikwidPairPosition;
-  const sendingNative = isNative(fromToken.address);
-  const calls = [];
+    console.log(`> SWAP (Exact Output): Buy ${amountStr} ${toToken.symbol} with ${fromToken.symbol}`);
 
-  // Approve if selling ERC20
-  if (!sendingNative) {
-    calls.push(...await buildApprovalCalls(publicClient, senderAddress, fromToken.address, fromToken.symbol, pairPositionAddress, amountIn));
+    let amountIn;
+    try {
+      const result = await publicClient.readContract({
+        address: netConfig.contracts.LikwidHelper,
+        abi: helperABI,
+        functionName: "getAmountIn",
+        args: [poolId, zeroForOne, amountOut, true],
+      });
+      amountIn = result[0] !== undefined ? result[0] : result;
+    } catch (e) {
+      return console.log(`> ERROR: Quote failed: ${e.shortMessage || e.message}`);
+    }
+
+    const amountInMax = (amountIn * (100n + slippage)) / 100n;
+    const sendingNative = isNative(fromToken.address);
+
+    console.log(`> Estimated cost: ~${formatUnits(amountIn, fromToken.decimals)} ${fromToken.symbol}`);
+    console.log(`> Max cost (${slippageStr}% slippage): ${formatUnits(amountInMax, fromToken.decimals)} ${fromToken.symbol}`);
+    console.log(`> Sender: ${senderAddress}`);
+    console.log(`> Account Type: ${config.accountType.toUpperCase()}`);
+
+    const calls = [];
+
+    if (!sendingNative) {
+      calls.push(...await buildApprovalCalls(publicClient, senderAddress, fromToken.address, fromToken.symbol, pairPositionAddress, amountInMax));
+    }
+
+    calls.push({
+      to: pairPositionAddress,
+      value: sendingNative ? amountInMax : 0n,
+      data: encodeFunctionData({
+        abi: pairPositionABI,
+        functionName: "exactOutput",
+        args: [{
+          poolId, zeroForOne, to: senderAddress,
+          amountInMax, amountOut, deadline,
+        }],
+      }),
+    });
+
+    await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
+  } else {
+    // --- Exact Input: sell specific amount of fromToken ---
+    const amountIn = parseUnits(amountStr, fromToken.decimals);
+
+    console.log(`> SWAP: ${amountStr} ${fromToken.symbol} -> ${toToken.symbol}`);
+
+    let amountOut;
+    try {
+      const result = await publicClient.readContract({
+        address: netConfig.contracts.LikwidHelper,
+        abi: helperABI,
+        functionName: "getAmountOut",
+        args: [poolId, zeroForOne, amountIn, true],
+      });
+      amountOut = result[0] !== undefined ? result[0] : result;
+    } catch (e) {
+      return console.log(`> ERROR: Quote failed: ${e.shortMessage || e.message}`);
+    }
+
+    const amountOutMin = (amountOut * (100n - slippage)) / 100n;
+    const sendingNative = isNative(fromToken.address);
+
+    console.log(`> Estimated output: ~${formatUnits(amountOut, toToken.decimals)} ${toToken.symbol}`);
+    console.log(`> Min output (${slippageStr}% slippage): ${formatUnits(amountOutMin, toToken.decimals)} ${toToken.symbol}`);
+    console.log(`> Sender: ${senderAddress}`);
+    console.log(`> Account Type: ${config.accountType.toUpperCase()}`);
+
+    const calls = [];
+
+    if (!sendingNative) {
+      calls.push(...await buildApprovalCalls(publicClient, senderAddress, fromToken.address, fromToken.symbol, pairPositionAddress, amountIn));
+    }
+
+    calls.push({
+      to: pairPositionAddress,
+      value: sendingNative ? amountIn : 0n,
+      data: encodeFunctionData({
+        abi: pairPositionABI,
+        functionName: "exactInput",
+        args: [{
+          poolId, zeroForOne, to: senderAddress,
+          amountIn, amountOutMin, deadline,
+        }],
+      }),
+    });
+
+    await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
   }
-
-  // Swap call
-  calls.push({
-    to: pairPositionAddress,
-    value: sendingNative ? amountIn : 0n,
-    data: encodeFunctionData({
-      abi: pairPositionABI,
-      functionName: "exactInput",
-      args: [{
-        poolId, zeroForOne, to: senderAddress,
-        amountIn, amountOutMin, deadline,
-      }],
-    }),
-  });
-
-  await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
 }
 
 // ======================= POOL INFO =======================
@@ -1626,10 +1730,10 @@ Setup:
 Pool Info:
   pools                                     List available pools on current network.
   pool_info <pool>                          Query on-chain pool state (reserves, rate).
-  quote <pool> <dir> <amount>               Get swap quote without executing.
+  quote <pool> <dir> <amount>               Get swap quote. dir: sell0|sell1|buy0|buy1
 
 DeFi Actions:
-  swap <pool> <dir> <amount> [slippage%]    Execute swap.
+  swap <pool> <dir> <amount> [slippage%]    Execute swap. dir: sell0|sell1|buy0|buy1
   lp_add <pool> <currency> <amt> [slip%]    Add or increase liquidity. currency: 0 or 1.
   lp_positions <pool>                       Show your liquidity positions.
   lp_remove <pool> [percent]                Remove liquidity. Default: 100% (all).

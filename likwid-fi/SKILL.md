@@ -124,16 +124,37 @@ Before executing, always preview the swap:
 node likwid-fi.js quote <pool> <direction> <amount>
 ```
 
-**Direction:**
-- `0to1` — Swap currency0 for currency1 (e.g., ETH → USDT)
-- `1to0` — Swap currency1 for currency0 (e.g., USDT → ETH)
+**Direction (Exact Input — sell specific amount):**
+- `sell0` — Sell currency0 for currency1 (e.g., sell 0.001 ETH → get ~X AGC)
+- `sell1` — Sell currency1 for currency0 (e.g., sell 100 AGC → get ~X ETH)
 
-**Report to human:**
+**Direction (Exact Output — buy specific amount):**
+- `buy1` — Buy exact amount of currency1 (e.g., buy 100 AGC → cost ~X ETH)
+- `buy0` — Buy exact amount of currency0 (e.g., buy 0.001 ETH → cost ~X AGC)
+
+**Examples:**
+```bash
+node likwid-fi.js quote ETH/AGC sell0 0.001    # sell 0.001 ETH, get ~? AGC
+node likwid-fi.js quote ETH/AGC buy1 100       # buy 100 AGC, cost ~? ETH
+node likwid-fi.js quote ETH/AGC sell1 100      # sell 100 AGC, get ~? ETH
+node likwid-fi.js quote ETH/AGC buy0 0.001     # buy 0.001 ETH, cost ~? AGC
+```
+
+**Report to human (exact input):**
 
 > **Swap Preview:**
 > Swapping `<AMOUNT>` `<FROM>` → ~`<OUTPUT>` `<TO>`
 > Fee: `<FEE_RATE>`% (`<FEE_AMOUNT>` `<FROM>`)
 > Slippage tolerance: `<SLIPPAGE>`%
+>
+> Proceed? (yes/no)
+
+**Report to human (exact output):**
+
+> **Swap Preview (Exact Output):**
+> Buying `<AMOUNT>` `<TO>` → cost ~`<COST>` `<FROM>`
+> Fee: `<FEE_RATE>`% (`<FEE_AMOUNT>` `<FROM>`)
+> Max cost (`<SLIPPAGE>`% slippage): `<MAX_COST>` `<FROM>`
 >
 > Proceed? (yes/no)
 
@@ -145,7 +166,7 @@ node likwid-fi.js quote <pool> <direction> <amount>
 node likwid-fi.js swap <pool> <direction> <amount> [slippage%]
 ```
 
-Default slippage: 1%.
+Default slippage: 1%. For exact output swaps, slippage is applied to the max input cost.
 
 **Report to human:**
 
@@ -500,7 +521,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `<key>` | File path | Path to file containing private key. |
 | `[type]` | `eoa`, `smart` | Account type (default: `eoa`). |
 | `<pool>` | `ETH/USDT`, `ETH-LIKWID` | Token pair. Lowest fee tier selected by default. |
-| `<dir>` | `0to1`, `1to0` | Swap direction. |
+| `<dir>` | `sell0`, `sell1`, `buy0`, `buy1` | Swap direction. `sell0`/`sell1` = exact input, `buy0`/`buy1` = exact output. |
 | `<cur>` | `0`, `1` | Which currency to provide (other auto-calculated). |
 | `<amt>` | `"0.01"`, `"100"` | Human-readable token amount. |
 | `[slip]` | `1`, `0.5`, `3` | Slippage tolerance in % (default: `1`). |
