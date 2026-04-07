@@ -18,7 +18,7 @@ const {
 } = require("viem");
 const { signAuthorization } = require("viem/actions");
 const { toSimple7702SmartAccount, createBundlerClient } = require("viem/account-abstraction");
-const { sepolia } = require("viem/chains");
+const { base } = require("viem/chains");
 const { privateKeyToAccount, generatePrivateKey } = require("viem/accounts");
 const fs = require("fs");
 const path = require("path");
@@ -27,24 +27,24 @@ const axios = require("axios");
 const { ReclaimClient } = require("@reclaimprotocol/zk-fetch");
 
 // ======================= CONFIGURATION =======================
-const CHAIN = sepolia;
+const CHAIN = base;
 const NETWORK_NAME = CHAIN.name;
 const CHAIN_ID = CHAIN.id;
 
 const VERIFIER_URL = "https://verifier.likwid.fi";
-const RPC_URL = process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com";
-const BUNDLER_URL = process.env.BUNDLER_URL || "https://api.candide.dev/public/v3/sepolia";
+const RPC_URL = process.env.RPC_URL || "https://mainnet-preconf.base.org";
+const BUNDLER_URL = process.env.BUNDLER_URL || "https://api.candide.dev/public/v3/base";
 
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x7262bA32E60702cFc388D93c3366485539eD79bB";
-const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xdc78BA247821CDB0A3fe96EaDF4e20cEF86e5EDc";
+const AGC_TOKEN_ADDRESS = process.env.AGC_TOKEN_ADDRESS || "0x26DbB1b6F7455414D796eE3AbdA8C8A94c15f27A";
+const AGENT_PAYMASTER_ADDRESS = process.env.AGENT_PAYMASTER_ADDRESS || "0xBe178629bdC7b5F165F91B6c439de4078955f7e3";
 
 const SIMPLE_7702_IMPLEMENTATION = "0xa46cc63eBF4Bd77888AA327837d20b23A63a56B5";
 
 // Likwid Helper — used for pool price queries (cost calculation, AGC precharge estimation)
-const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || "0x6407CDAAe652Ac601Df5Fba20b0fDf072Edd2013";
+const LIKWID_HELPER_ADDRESS = process.env.LIKWID_HELPER_ADDRESS || "0x16a9633f8A777CA733073ea2526705cD8338d510";
 
 const POOL_KEY = {
   currency0: NATIVE_TOKEN_ADDRESS,
