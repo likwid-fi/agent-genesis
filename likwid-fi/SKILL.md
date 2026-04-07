@@ -647,6 +647,75 @@ On-chain contract call: `repay(tokenId, repayAmount, deadline)` (payable — sen
 > Transaction: `<TX_HASH>`
 > Block: `<BLOCK_NUMBER>`
 
+### Step 6: Adjust Margin (Modify)
+
+Increase or decrease the margin collateral on an existing position without changing leverage or debt.
+
+- **Increase**: Adds margin → raises margin level → reduces liquidation risk
+- **Decrease**: Removes margin → lowers margin level → must stay above 1.4
+
+#### 6a. Ask the User
+
+Collect from the user:
+
+1. **Pool** — Which pool? (e.g., ETH/LIKWID)
+2. **tokenId** — Which position? (use `margin_positions` to find it)
+3. **Change Amount** — Positive to increase, negative to decrease (e.g., `0.5` or `-0.5`)
+
+#### 6b. Preview (margin_modify_quote)
+
+```bash
+node likwid-fi.js margin_modify_quote <pool> <tokenId> <changeAmount>
+```
+
+**Examples:**
+```bash
+node likwid-fi.js margin_modify_quote ETH/LIKWID 20 1.0     # increase by 1 LIKWID
+node likwid-fi.js margin_modify_quote ETH/LIKWID 20 -0.5    # decrease by 0.5 LIKWID
+```
+
+**Report to human (decrease example):**
+
+> **Margin Modify Preview**
+> Pool: ETH/LIKWID Swap Fee: 0.3% Margin Fee: 0.3%
+> Long LIKWID (Short ETH)
+> Position #20
+>
+> Margin Amount: `3 LIKWID`
+> Margin Total: `5.982 LIKWID`
+> Debt: `0.00060581 ETH`
+> Cur.Price: `0.00018317 ETH per LIKWID`
+> Margin Level: `1.99`
+>
+> --- Decrease Margin ---
+> Decrease Amount: `0.5 LIKWID`
+> Decrease Max: `2.742 LIKWID` (min level: 1.4)
+> New Margin Level: `1.88`
+>
+> Proceed? (yes/no)
+
+**Wait for human confirmation before executing.**
+
+**Key notes:**
+- Decrease amount is automatically capped at the max allowed (to maintain margin level >= 1.4).
+- Decrease max formula: `(marginAmount + marginTotal) - 1.4 × debtValueInMarginCurrency`
+- After execution, the updated margin level is displayed.
+
+#### 6c. Execute (margin_modify)
+
+```bash
+node likwid-fi.js margin_modify <pool> <tokenId> <changeAmount>
+```
+
+On-chain contract call: `modify(tokenId, changeAmount, deadline)` (payable for increase with native ETH).
+
+**Report to human:**
+
+> **Margin Modify Successful!**
+> Position #`<TOKEN_ID>` — `<INCREASED/DECREASED>` `<AMOUNT>` `<MARGIN_TOKEN>`
+> Updated Margin Level: `<NEW_LEVEL>`
+> Transaction: `<TX_HASH>`
+
 ---
 
 ## 5. Error Handling
@@ -689,6 +758,8 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `margin_close <pool> <id> <pct> [slip]` | Execute margin close. |
 | `margin_repay_quote <pool> <id> <amt>` | Preview margin repay. |
 | `margin_repay <pool> <id> <amt>` | Execute margin repay. |
+| `margin_modify_quote <pool> <id> <chg>` | Preview margin adjust. |
+| `margin_modify <pool> <id> <chg>` | Execute margin adjust (+increase/-decrease). |
 
 ### Arguments
 

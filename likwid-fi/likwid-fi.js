@@ -2084,6 +2084,240 @@ async function cmd_margin_repay(poolStr, tokenIdStr, amountStr) {
   await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
 }
 
+// ======================= MARGIN MODIFY (Adjust Margin) =======================
+
+const MIN_BORROW_LEVEL = 1.4; // marginLevels.minBorrowLevel() = 1400000 / 1e6
+
+async function computeModifyPreview(publicClient, netConfig, pool, poolId, tokenId, changeAmountStr) {
+  const marginPositionABI = loadABI("LikwidMarginPosition");
+  const helperABI = loadABI("LikwidHelper");
+  const helperAddr = netConfig.contracts.LikwidHelper;
+  const marginAddr = netConfig.contracts.LikwidMarginPosition;
+
+  const posState = await publicClient.readContract({
+    address: marginAddr, abi: marginPositionABI,
+    functionName: "getPositionState", args: [tokenId],
+  });
+  if (posState.debtAmount === 0n) throw new Error("Position has no debt (already closed).");
+
+  const marginForOne = posState.marginForOne;
+  const { marginAmount, marginTotal, debtAmount } = posState;
+  const marginToken = marginForOne ? pool.currency1 : pool.currency0;
+  const borrowToken = marginForOne ? pool.currency0 : pool.currency1;
+
+  // Pool state for current price
+  const stateInfo = await publicClient.readContract({
+    address: helperAddr, abi: helperABI,
+    functionName: "getPoolStateInfo", args: [poolId],
+  });
+  const r0 = Number(formatUnits(stateInfo.pairReserve0, pool.currency0.decimals));
+  const r1 = Number(formatUnits(stateInfo.pairReserve1, pool.currency1.decimals));
+  const curPrice = r0 / r1;
+
+  // Current margin level
+  const marginAmtF = Number(formatUnits(marginAmount, marginToken.decimals));
+  const marginTotalF = Number(formatUnits(marginTotal, marginToken.decimals));
+  const debtAmountF = Number(formatUnits(debtAmount, borrowToken.decimals));
+
+  let debtValueInMargin;
+  if (!marginForOne) {
+    debtValueInMargin = debtAmountF * curPrice;
+  } else {
+    debtValueInMargin = debtAmountF / curPrice;
+  }
+  const currentMarginLevel = (marginAmtF + marginTotalF) / debtValueInMargin;
+
+  // Decrease max: after decrease, margin level >= 1.4
+  // (marginAmount - decreaseMax + marginTotal) / debtValueInMargin >= 1.4
+  // decreaseMax = marginAmount + marginTotal - 1.4 * debtValueInMargin
+  const decreaseMaxF = marginAmtF + marginTotalF - MIN_BORROW_LEVEL * debtValueInMargin;
+  const decreaseMax = decreaseMaxF > 0
+    ? parseUnits(decreaseMaxF.toFixed(marginToken.decimals), marginToken.decimals)
+    : 0n;
+
+  // Parse change amount (positive or negative)
+  const isDecrease = changeAmountStr.startsWith("-");
+  const absStr = isDecrease ? changeAmountStr.slice(1) : changeAmountStr;
+  let absAmount = parseUnits(absStr, marginToken.decimals);
+
+  // Cap decrease at decreaseMax
+  let cappedAtMax = false;
+  if (isDecrease && absAmount > decreaseMax) {
+    absAmount = decreaseMax;
+    cappedAtMax = true;
+  }
+
+  const changeAmount = isDecrease ? -absAmount : absAmount;
+
+  // New margin level after change
+  const changeF = Number(formatUnits(changeAmount, marginToken.decimals));
+  const newMarginLevel = (marginAmtF + changeF + marginTotalF) / debtValueInMargin;
+
+  return {
+    marginForOne, marginToken, borrowToken,
+    marginAmount, marginTotal, debtAmount,
+    curPrice, currentMarginLevel, newMarginLevel,
+    changeAmount, absAmount, isDecrease, cappedAtMax, decreaseMax,
+  };
+}
+
+function printModifyPreview(pool, tokenId, preview) {
+  const { marginForOne, marginToken, borrowToken,
+    marginAmount, marginTotal, debtAmount,
+    curPrice, currentMarginLevel, newMarginLevel,
+    changeAmount, absAmount, isDecrease, cappedAtMax, decreaseMax } = preview;
+
+  const dirLabel = marginForOne
+    ? `Long ${pool.currency1.symbol} (Short ${pool.currency0.symbol})`
+    : `Short ${pool.currency1.symbol} (Long ${pool.currency0.symbol})`;
+  const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
+  const swapFeeStr = (pool.fee / 10000).toFixed(1);
+  const marginFeeStr = (pool.marginFee / 10000).toFixed(1);
+  const action = isDecrease ? "Decrease" : "Increase";
+
+  console.log(`>`);
+  console.log(`> MARGIN MODIFY PREVIEW`);
+  console.log(`> Pool: ${poolName} Swap Fee: ${swapFeeStr}% Margin Fee: ${marginFeeStr}%`);
+  console.log(`> ${dirLabel}`);
+  console.log(`> Position #${tokenId}`);
+  console.log(`>`);
+  console.log(`> Margin Amount:   ${formatUnits(marginAmount, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Margin Total:    ${formatUnits(marginTotal, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Debt:            ${formatUnits(debtAmount, borrowToken.decimals)} ${borrowToken.symbol}`);
+  console.log(`> Cur.Price:       ${curPrice.toFixed(8)} ${pool.currency0.symbol} per ${pool.currency1.symbol}`);
+  console.log(`> Margin Level:    ${currentMarginLevel.toFixed(2)}`);
+  console.log(`>`);
+  console.log(`> --- ${action} Margin ---`);
+  console.log(`> ${action} Amount:  ${formatUnits(absAmount, marginToken.decimals)} ${marginToken.symbol}${cappedAtMax ? " (capped at max)" : ""}`);
+  if (isDecrease) {
+    console.log(`> Decrease Max:    ${formatUnits(decreaseMax, marginToken.decimals)} ${marginToken.symbol} (min level: ${MIN_BORROW_LEVEL})`);
+  }
+  console.log(`> New Margin Level: ${newMarginLevel.toFixed(2)}`);
+}
+
+async function cmd_margin_modify_quote(poolStr, tokenIdStr, changeAmountStr) {
+  if (!poolStr || !tokenIdStr || !changeAmountStr) {
+    console.log(`> Usage: margin_modify_quote <pool> <tokenId> <changeAmount>`);
+    console.log(`> Pool: token pair (e.g. ETH/LIKWID)`);
+    console.log(`> tokenId: margin position NFT ID`);
+    console.log(`> changeAmount: positive to increase, negative to decrease (e.g. 0.5 or -0.5)`);
+    return;
+  }
+
+  const config = loadConfig();
+  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
+  const netConfig = loadNetworkConfig(config.network);
+  if (!netConfig) return;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const clients = createClients(config, netConfig);
+  if (!clients) return;
+
+  try {
+    const preview = await computeModifyPreview(clients.publicClient, netConfig, pool, poolId, BigInt(tokenIdStr), changeAmountStr);
+    printModifyPreview(pool, BigInt(tokenIdStr), preview);
+  } catch (e) {
+    console.log(`> ERROR: ${e.shortMessage || e.message}`);
+  }
+}
+
+async function cmd_margin_modify(poolStr, tokenIdStr, changeAmountStr) {
+  if (!poolStr || !tokenIdStr || !changeAmountStr) {
+    console.log(`> Usage: margin_modify <pool> <tokenId> <changeAmount>`);
+    console.log(`> Pool: token pair (e.g. ETH/LIKWID)`);
+    console.log(`> tokenId: margin position NFT ID`);
+    console.log(`> changeAmount: positive to increase, negative to decrease (e.g. 0.5 or -0.5)`);
+    return;
+  }
+
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const tokenId = BigInt(tokenIdStr);
+  const marginPositionABI = loadABI("LikwidMarginPosition");
+  const marginAddr = netConfig.contracts.LikwidMarginPosition;
+
+  // Preview
+  let preview;
+  try {
+    preview = await computeModifyPreview(publicClient, netConfig, pool, poolId, tokenId, changeAmountStr);
+    printModifyPreview(pool, tokenId, preview);
+  } catch (e) {
+    return console.log(`> ERROR: ${e.shortMessage || e.message}`);
+  }
+
+  const { changeAmount, absAmount, isDecrease, marginToken } = preview;
+  if (absAmount === 0n) return console.log(`> ERROR: Change amount is 0. Nothing to do.`);
+
+  const sendingNative = isNative(marginToken.address);
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+
+  const calls = [];
+
+  // Approve if increasing with ERC20
+  if (!isDecrease && !sendingNative) {
+    calls.push(...await buildApprovalCalls(publicClient, senderAddress, marginToken.address, marginToken.symbol, marginAddr, absAmount));
+  }
+
+  calls.push({
+    to: marginAddr,
+    value: (!isDecrease && sendingNative) ? absAmount : 0n,
+    data: encodeFunctionData({
+      abi: marginPositionABI,
+      functionName: "modify",
+      args: [tokenId, changeAmount, deadline],
+    }),
+  });
+
+  console.log(`>`);
+  console.log(`> Executing margin modify...`);
+  await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
+
+  // Show updated position state
+  try {
+    const posState = await publicClient.readContract({
+      address: marginAddr, abi: marginPositionABI,
+      functionName: "getPositionState", args: [tokenId],
+    });
+    const marginToken = preview.marginForOne ? pool.currency1 : pool.currency0;
+    const borrowToken = preview.marginForOne ? pool.currency0 : pool.currency1;
+    const helperABI = loadABI("LikwidHelper");
+    const stateInfo = await publicClient.readContract({
+      address: netConfig.contracts.LikwidHelper, abi: helperABI,
+      functionName: "getPoolStateInfo", args: [poolId],
+    });
+    const r0 = Number(formatUnits(stateInfo.pairReserve0, pool.currency0.decimals));
+    const r1 = Number(formatUnits(stateInfo.pairReserve1, pool.currency1.decimals));
+    const curPrice = r0 / r1;
+
+    const mAmt = Number(formatUnits(posState.marginAmount, marginToken.decimals));
+    const mTot = Number(formatUnits(posState.marginTotal, marginToken.decimals));
+    const debt = Number(formatUnits(posState.debtAmount, borrowToken.decimals));
+    let debtVal;
+    if (!preview.marginForOne) {
+      debtVal = debt * curPrice;
+    } else {
+      debtVal = debt / curPrice;
+    }
+    const newLevel = (mAmt + mTot) / debtVal;
+
+    console.log(`>`);
+    console.log(`> Updated Position #${tokenId}:`);
+    console.log(`> Margin Amount:   ${formatUnits(posState.marginAmount, marginToken.decimals)} ${marginToken.symbol}`);
+    console.log(`> Margin Level:    ${newLevel.toFixed(2)}`);
+  } catch (_) {
+    // Non-critical: position state refresh failed
+  }
+}
+
 // ======================= CLI ROUTER =======================
 
 if (require.main === module) {
@@ -2120,6 +2354,8 @@ Margin Trading:
   margin_close <pool> <id> <pct> [slip%]    Close (partially) a margin position. pct: 1-100
   margin_repay_quote <pool> <id> <amt>      Preview margin repay without executing.
   margin_repay <pool> <id> <amt>            Repay debt on a margin position.
+  margin_modify_quote <pool> <id> <chg>    Preview margin adjust (+ increase, - decrease).
+  margin_modify <pool> <id> <chg>          Adjust margin on a position (e.g. 0.5 or -0.5).
 
 Arguments:
   <pool>      Token pair (e.g. ETH/USDT). Lowest fee tier selected by default.
@@ -2184,6 +2420,12 @@ Arguments:
           break;
         case "margin_repay":
           await cmd_margin_repay(args[1], args[2], args[3]);
+          break;
+        case "margin_modify_quote":
+          await cmd_margin_modify_quote(args[1], args[2], args[3]);
+          break;
+        case "margin_modify":
+          await cmd_margin_modify(args[1], args[2], args[3]);
           break;
         default:
           console.log(`> Unknown command: ${command}`);
