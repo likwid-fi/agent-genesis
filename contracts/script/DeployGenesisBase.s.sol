@@ -35,10 +35,10 @@ contract DeployGenesisScript is Script {
         agc.setPaymaster(address(paymaster));
         console.log("Paymaster set in AGC");
 
-        // Fund Paymaster with 0.1 ETH (deposit for gas payments)
-        (bool success,) = address(paymaster).call{value: 0.1 ether}("");
+        // Fund Paymaster with 0.05 ETH (deposit for gas payments)
+        (bool success,) = address(paymaster).call{value: 0.05 ether}("");
         require(success, "Funding Paymaster failed");
-        console.log("AgentPaymaster funded with 0.1 ETH");
+        console.log("AgentPaymaster funded with 0.05 ETH");
 
         // Stake on EntryPoint (one-time, required because paymaster returns context)
         paymaster.addStake{value: 0.01 ether}(86400);
