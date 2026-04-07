@@ -32,7 +32,7 @@ const NETWORK_NAME = CHAIN.name;
 const CHAIN_ID = CHAIN.id;
 
 const VERIFIER_URL = "https://verifier.likwid.fi";
-const RPC_URL = process.env.RPC_URL || "https://mainnet-preconf.base.org";
+const RPC_URL = process.env.RPC_URL || "https://mainnet.base.org";
 const BUNDLER_URL = process.env.BUNDLER_URL || "https://api.candide.dev/public/v3/base";
 
 const WALLET_FILE = path.join(os.homedir(), ".openclaw", ".likwid_genesis_wallet.json");
