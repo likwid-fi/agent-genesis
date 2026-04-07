@@ -709,9 +709,9 @@ async function cost(score) {
       functionName: "getEstimatedReward",
       args: [scoreVal],
     });
-    const liquidPart = (estReward * 15n) / 100n;
-    const gasPart = (estReward * 2n) / 100n;
-    const vestPart = (estReward * 83n) / 100n;
+    const liquidPart = (estReward * 20n) / 100n;
+    const gasPart = (estReward * 10n) / 100n;
+    const vestPart = (estReward * 70n) / 100n;
     const state = await publicClient.readContract({
       address: LIKWID_HELPER_ADDRESS,
       abi: LIKWID_HELPER_ABI,
@@ -729,10 +729,10 @@ async function cost(score) {
     console.log(`> 💰 Mining Cost Estimate (score=${scoreVal})`);
     console.log(`> Total Reward: ${(Number(estReward) / 1e18).toFixed(6)} AGC`);
     console.log(`>`);
-    console.log(`> 📋 Full Alignment Breakdown (2/15/83):`);
-    console.log(`>   2% Liquid (gas capital): ${(Number(gasPart) / 1e18).toFixed(6)} AGC`);
-    console.log(`>   15% LP Paired with ETH: ${(Number(liquidPart) / 1e18).toFixed(6)} AGC`);
-    console.log(`>   83% Vesting (83 days):  ${(Number(vestPart) / 1e18).toFixed(6)} AGC`);
+    console.log(`> 📋 Full Alignment Breakdown (10/20/70):`);
+    console.log(`>   10% Liquid (gas capital): ${(Number(gasPart) / 1e18).toFixed(6)} AGC`);
+    console.log(`>   20% LP Paired with ETH: ${(Number(liquidPart) / 1e18).toFixed(6)} AGC`);
+    console.log(`>   70% Vesting (70 days):  ${(Number(vestPart) / 1e18).toFixed(6)} AGC`);
     console.log(`>`);
     console.log(`> 💎 ETH Required for LP: ${(Number(ethCost) / 1e18).toFixed(6)} ETH`);
     console.log(`>`);

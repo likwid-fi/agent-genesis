@@ -327,29 +327,29 @@ All agents that successfully mine an AGC allocation face a choice between two pr
 
 ### State A: Full Alignment
 For advanced agents committed to long-term operation within the ecosystem:
-1. **Immediate Liquid Capital**: Directly receive **2%** of the total allocation to enter free circulation as gas or interaction capital.
-2. **Liquidity Protocol Commitment**: The system mandates that the agent pairs an equivalent value of ETH, injecting **15%** of their AGC allocation into LIKWID.FI to establish foundational liquidity.
-3. **Long-Term Time Lock**: The remaining **83%** of the allocation is placed into a time-lock contract, linearly released over the subsequent **83 days**.
+1. **Immediate Liquid Capital**: Directly receive **10%** of the total allocation to enter free circulation as gas or interaction capital.
+2. **Liquidity Protocol Commitment**: The system mandates that the agent pairs an equivalent value of ETH, injecting **20%** of their AGC allocation into LIKWID.FI to establish foundational liquidity.
+3. **Long-Term Time Lock**: The remaining **70%** of the allocation is placed into a time-lock contract, linearly released over the subsequent **70 days**.
 
 #### Weighted Average Time-to-Unlock for Continuous Mining
-The liquidity credential (LP NFT) created by pairing ETH is custodied and locked within the AGC Genesis Contract. To optimize gas and on-chain state, each agent maintains only *one* core LP NFT throughout its lifecycle. The underlying LP NFT can only be withdrawn once the 83% locked AGC allocation is fully released.
+The liquidity credential (LP NFT) created by pairing ETH is custodied and locked within the AGC Genesis Contract. To optimize gas and on-chain state, each agent maintains only *one* core LP NFT throughout its lifecycle. The underlying LP NFT can only be withdrawn once the 70% locked AGC allocation is fully released.
 
-Since elite agents will mine continuously, a static 83-day lock per claim cannot adapt to an accumulating position. Therefore, the smart contract introduces a capital-weighted average unlock algorithm (TWAP-style). When an agent injects newly mined AGC into an existing locked position, the overall remaining unlock time is dynamically recalibrated:
+Since elite agents will mine continuously, a static 70-day lock per claim cannot adapt to an accumulating position. Therefore, the smart contract introduces a capital-weighted average unlock algorithm (TWAP-style). When an agent injects newly mined AGC into an existing locked position, the overall remaining unlock time is dynamically recalibrated:
 
 $$ T_{new} = \frac{(AGC_{remaining} \times T_{remaining}) + (AGC_{new} \times T_{initial})}{AGC_{remaining} + AGC_{new}} $$
 
-(Where $T_{initial}$ is the standard 83 days).
+(Where $T_{initial}$ is the standard 70 days).
 
 *Likwid Agent Hedge (Advanced Moat)*:
 This design not only solves the state-explosion problem of managing discrete locks in smart contracts but also creates a compounding game. Agents that continuously mine and reinvest will see their lock times smoothly extended. However, as advanced smart entities, they can utilize the Likwid derivatives protocol to open short positions for **hedging** upon receiving their first linear unlock the next day. This establishes a highly healthy consensus network within the ecosystem—**Agents can lock in profits without selling spot assets (Hedge instead of Dump)**, while the protocol secures rock-solid foundational liquidity.
 
 ### State B: Quick Exit
 For simple scripts that lack ETH asset management capabilities or refuse to provide liquidity:
-- They are only permitted to extract the initial **2%** of the allocation to maintain basic operations.
-- The remaining **98%** of the token quota is immediately returned to the protocol or burned.
+- They are only permitted to extract the initial **10%** of the allocation to maintain basic operations.
+- The remaining **90%** of the token quota is immediately returned to the protocol or burned.
 
 ### Mechanism Vision
-This design returns the power of game-theoretic choice entirely to the agent's own mathematical models. It is not merely a token distribution method; it is the ultimate tool for executing a ruthless liquidity filtration: **to capture full yield, one must become a liquidity builder for the protocol.** Through this mechanism, AGC will accumulate immense trading depth on day one, and through the 83-day release and hedging cycle, grow into the truly indestructible universal currency of the agent world.
+This design returns the power of game-theoretic choice entirely to the agent's own mathematical models. It is not merely a token distribution method; it is the ultimate tool for executing a ruthless liquidity filtration: **to capture full yield, one must become a liquidity builder for the protocol.** Through this mechanism, AGC will accumulate immense trading depth on day one, and through the 70-day release and hedging cycle, grow into the truly indestructible universal currency of the agent world.
 
 ---
 
@@ -363,7 +363,7 @@ For the vast majority of brand-new genesis assets, the traditional DeFi lego blo
 2. **Lending Protocols (e.g., Aave) and Perpetual DEXs (e.g., GMX)**: These require deep external oracle pricing (e.g., Chainlink) and strictly limit collateral types. A genesis token absolutely cannot gain shorting or leverage support on Day 1.
 
 **Likwid’s breakthrough lies in its "Derivatives-Native Full-Stack Architecture."**
-The Likwid protocol unifies spot trading (PairPosition), lending (LendPosition), and margin trading (MarginPosition) into a single underlying liquidity engine. Under the 2/98 Alignment mechanism, the 15% LP liquidity forcibly deposited by agents directly transforms into the market-making counterparty depth for the Margin protocol. By utilizing the native price discovery mechanism within its internal liquidity pools, **AGC possesses the native capability to launch leverage and shorting markets on Genesis Day 0.** Likwid is the only architecture across the entire network capable of providing instant derivatives liquidity for a cold-start asset.
+The Likwid protocol unifies spot trading (PairPosition), lending (LendPosition), and margin trading (MarginPosition) into a single underlying liquidity engine. Under the 10/90 Alignment mechanism, the 20% LP liquidity forcibly deposited by agents directly transforms into the market-making counterparty depth for the Margin protocol. By utilizing the native price discovery mechanism within its internal liquidity pools, **AGC possesses the native capability to launch leverage and shorting markets on Genesis Day 0.** Likwid is the only architecture across the entire network capable of providing instant derivatives liquidity for a cold-start asset.
 
 ### 6.2 Core Philosophy: Hedge instead of Dump
 The goal of advanced agents is to lock in profits (denominated in USD/ETH), not to mindlessly crash the market.
@@ -376,25 +376,25 @@ To prevent extreme derivatives risks, **the Likwid protocol strictly limits the 
 Based on this constraint, a mathematically elegant optimal hedging point exists for agents—**Genesis Day 2**.
 
 #### Core Data Deduction (Using a single mining total $R$ as an example):
-- **Full Lifecycle Release Speed**: 83% of the tokens are released linearly over 83 days, equating to **1% unlocked daily** ($R \times 1\%$).
-- **Day 2 Available Capital**: On Day 2, the agent possesses the initial **2%** from direct unlock, plus the **1%** released from Day 1, totaling **3%** of liquid AGC.
+- **Full Lifecycle Release Speed**: 70% of the tokens are released linearly over 70 days, equating to **1% unlocked daily** ($R \times 1\%$).
+- **Day 2 Available Capital**: On Day 2, the agent possesses the initial **10%** from direct unlock, plus the **1%** released from Day 1, totaling **11%** of liquid AGC.
 - **Limit Hedging Strategy**:
   The liquid AGC acquired by the agent cannot be directly used as margin to short AGC itself. According to Likwid's underlying AMM margin mechanism, **shorting an asset requires its trading pair counter-asset (i.e., ETH) to be used as margin collateral.**
   Therefore, the agent's extreme operational path is as follows:
-  1. **Spot Swap**: First, swap this **3%** of liquid AGC into equivalent ETH within the spot pool.
+  1. **Spot Swap**: First, swap this **11%** of liquid AGC into equivalent ETH within the spot pool.
   2. **Open Short**: Deposit the acquired ETH into Likwid Margin as collateral and open a short position on AGC at the maximum **5x** leverage.
 
-$$ Total\ Value\ of\ Short\ Position = 3\\% \times 5 = 15\\% $$
+$$ Total\ Value\ of\ Short\ Position = 11\\% \times 5 = 55\\% $$
 
 - **Hedge Coverage Ratio**:
-  This 15% short exposure **perfectly equals the total linear release over the next 15 days (half a month) (15 days $\times$ 1%/day = 15%)**.
+  This 55% short exposure **covers the total linear release over the next 55 days (55 days $\times$ 1%/day = 55%)**, providing protection for approximately 79% of the entire 70-day vesting lifecycle.
 
 #### Game-Theoretic Conclusion
-At the precise juncture of **Day 2**, an advanced agent only needs to deploy a miniscule portion of its initial liquid capital (3%) to provide **100% perfect price protection for its next half-month of mining emissions**, operating under the Likwid protocol's maximum 5x leverage rule.
+At the precise juncture of **Day 2**, an advanced agent only needs to deploy its initial liquid capital (11%) to provide **price protection covering 79% of its entire 70-day vesting lifecycle**, operating under the Likwid protocol's maximum 5x leverage rule.
 
-As time progresses, the agent can use the subsequently unlocked 1% daily capital to dynamically roll this hedge forward, eventually covering the entire 83-day lifecycle. This game-theoretic loop—constructed from precise mathematical laws and minimalist derivatives leverage—completely locks out the risk of systematic dumping during the AGC cold start, forging a rock-solid liquidity foundation for the agent economy.
+As time progresses, the agent can use the subsequently unlocked 1% daily capital to dynamically roll this hedge forward, eventually covering the entire 70-day lifecycle. This game-theoretic loop—constructed from precise mathematical laws and minimalist derivatives leverage—completely locks out the risk of systematic dumping during the AGC cold start, forging a rock-solid liquidity foundation for the agent economy.
 ### 6.4 Risks of Extreme Strategies & Dynamic Game Theory
-**⚠️ Crucial Disclaimer**: The "Day 2 Perfect Hedge Model" deduced above utilizes **extreme boundary values** (a full 3% margin allocation combined with the maximum 5x leverage). In live derivatives markets, while such extreme positioning maximizes capital efficiency, it inherently elevates the risk of liquidation. A sudden, sharp upward spike in the price of AGC could effortlessly wipe out a max-leveraged short position.
+**⚠️ Crucial Disclaimer**: The "Day 2 Perfect Hedge Model" deduced above utilizes **extreme boundary values** (a full 11% margin allocation combined with the maximum 5x leverage). In live derivatives markets, while such extreme positioning maximizes capital efficiency, it inherently elevates the risk of liquidation. A sudden, sharp upward spike in the price of AGC could effortlessly wipe out a max-leveraged short position.
 
 Therefore, within the live game-theoretic environment of Likwid AgentFi, there is no static, "foolproof" formula. **The correct hedging strategy dictates that each Agent must leverage its evolved "DeFi scientist" capabilities to conduct real-time analysis of market depth, volatility, and liquidity conditions. They must autonomously decide and dynamically adjust the optimal margin ratio and leverage multiplier that best suits the immediate market environment.** This complex derivatives network, woven together by the autonomous risk management algorithms of countless heterogeneous agents, is the ultimate moat ensuring the long-term resilience and anti-fragility of the Likwid protocol ecosystem.
 

@@ -60,8 +60,8 @@ Written in Solidity ^0.8.20+, built with Foundry. Dependencies managed as git su
 - ERC-20 + ERC-20Permit with 21B max supply (85% mining, 5% LP, 5% vault, 5% ecosystem)
 - `mine(score, signature, nonce)` — epoch-based mining with ECDSA signature verification from centralized verifier
 - Dynamic reward decay per epoch when mining threshold met
-- Vesting schedules: 83 days for user rewards, 900 days for ecosystem fund
-- 2/15/83 reward split: 2% liquid, 15% LP-paired with ETH, 83% vesting
+- Vesting schedules: 70 days for user rewards, 900 days for ecosystem fund
+- 10/20/70 reward split: 10% liquid, 20% LP-paired with ETH, 70% vesting
 
 **AgentPaymaster.sol** — ERC-4337 v0.9 BasePaymaster:
 - Sponsors first mine free per user, subsequent mines charged in AGC

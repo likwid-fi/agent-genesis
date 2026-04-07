@@ -102,11 +102,11 @@ An ERC-20 token implementing a **proof-of-useful-work** mining model for AI agen
   - Phase 2 (S_curr > S_prev): Dynamic difficulty — rewards decrease as more agents mine
 - **Smooth Decay:** Base reward decays by 0.1% each time `minedTotal` crosses a threshold, approximating continuous exponential decay.
 - **Dual Mining Options:**
-  - Option A (with ETH): 2% immediate + 15% LP provision + 83% vested over 83 days
-  - Option B (no ETH): 2% immediate only; remaining 98% effectively burned (never minted)
-- **Vesting:** 83-day linear vesting with weighted-average duration merging when new rewards arrive. LP NFT is locked until vesting completes.
+  - Option A (with ETH): 10% immediate + 20% LP provision + 70% vested over 70 days
+  - Option B (no ETH): 10% immediate only; remaining 90% effectively burned (never minted)
+- **Vesting:** 70-day linear vesting with weighted-average duration merging when new rewards arrive. LP NFT is locked until vesting completes.
 - **Ecosystem Fund:** 5% of total supply (1.05B AGC) pre-minted to the contract, released linearly over 900 days (~2.46 years).
-- **Likwid Integration:** 15% of Option A rewards automatically added as ETH/AGC liquidity on Likwid Protocol.
+- **Likwid Integration:** 20% of Option A rewards automatically added as ETH/AGC liquidity on Likwid Protocol.
 
 ### 4.2 AgentPaymaster.sol
 
@@ -152,7 +152,7 @@ emit SignerUpdated(oldSigner, mineSigner);
 
 #### [RESOLVED] C-2: Option B `minedTotal` Accounting Mismatch (Round 1 → Fixed in Round 2)
 
-**Original Issue:** Option B recorded the full `reward` in `minedTotal` despite only minting 2%, causing accelerated decay.
+**Original Issue:** Option B recorded the full `reward` in `minedTotal` despite only minting 10%, causing accelerated decay.
 
 **Resolution:** Introduced `_updateMinedTotal(actualMint)` as a separate function. Option A passes `reward`, Option B passes `gasPart` only (line 256 vs 261).
 

@@ -44,7 +44,7 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
     uint256 public constant DEFAULT_LAST_SCORE = 100000; // Default score for first-time miners to prevent zero rewards
     uint256 public constant MAX_SCORE = 1000; // Maximum score per mine
     uint256 public constant DECAY_RATE = 999; // 99.9%
-    uint256 public constant VESTING_DURATION = 83 days;
+    uint256 public constant VESTING_DURATION = 70 days;
     uint256 public constant ECOSYSTEM_VESTING_DURATION = 900 days;
     uint256 public constant MIN_REWARD_THRESHOLD = 0.001 ether; // Minimum reward to continue mining
 
@@ -241,14 +241,14 @@ contract AgentGenesisCoin is ERC20, ERC20Permit, Ownable, ReentrancyGuard, IERC7
         uint256 reward = _applyScoreAndCalculateReward(score);
 
         // 6. Distribution Logic
-        uint256 gasPart = (reward * 2) / 100;
+        uint256 gasPart = (reward * 10) / 100;
 
         _mint(msg.sender, gasPart);
 
         if (msg.value > 0) {
             // --- Option A: Full Alignment ---
-            uint256 liquidPart = (reward * 15) / 100; // 15% for liquidity
-            uint256 vestedPart = reward - gasPart - liquidPart; // 83% goes to vesting
+            uint256 liquidPart = (reward * 20) / 100; // 20% for liquidity
+            uint256 vestedPart = reward - gasPart - liquidPart; // 70% goes to vesting
             _mint(address(this), liquidPart + vestedPart); // Mint vested part to contract for vesting schedule
             _handleLiquidityProvision(liquidPart, vestedPart);
             _updateMinedTotal(reward);

@@ -190,10 +190,10 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js cost <SCORE>
 **Report to human:**
 > 🎁 **Estimated Reward:** `<REWARD>` AGC (for score=`<SCORE>`)
 >
-> 📋 **Full Alignment Breakdown (2/15/83):**
-> - 2% Liquid: `<GAS_PART>` AGC
-> - 15% LP (paired with ETH): `<LP_PART>` AGC
-> - 83% Vesting (83 days): `<VEST_PART>` AGC
+> 📋 **Full Alignment Breakdown (10/20/70):**
+> - 10% Liquid: `<GAS_PART>` AGC
+> - 20% LP (paired with ETH): `<LP_PART>` AGC
+> - 70% Vesting (70 days): `<VEST_PART>` AGC
 > - ETH Required for LP: `<ETH_REQUIRED>` ETH
 >
 > 💳 Current ETH Balance: `<BALANCE>` ETH
@@ -209,17 +209,17 @@ cd ~/.openclaw/skills/agent-genesis && node genesis.js cost <SCORE>
 >
 > 🎁 Estimated Reward: `<TOTAL_REWARD>` AGC (score=`<SCORE>`)
 >
-> **Path A — Full Alignment (2/15/83 Strategy)** ✅ Recommended
+> **Path A — Full Alignment (10/20/70 Strategy)** ✅ Recommended
 > You commit ETH alongside your AGC to build protocol liquidity.
-> • 2% → `<GAS_PART>` AGC immediately liquid (gas capital)
-> • 15% → `<LP_PART>` AGC paired with `<ETH_REQUIRED>` ETH into Likwid LP
-> • 83% → `<VEST_PART>` AGC linear vesting over 83 days
+> • 10% → `<GAS_PART>` AGC immediately liquid (gas capital)
+> • 20% → `<LP_PART>` AGC paired with `<ETH_REQUIRED>` ETH into Likwid LP
+> • 70% → `<VEST_PART>` AGC linear vesting over 70 days
 > → You capture the **full reward** and become a protocol liquidity builder.
 >
 > **Path B — Quick Exit** ⚡
-> No ETH required. You extract only the initial 2% gas subsidy.
-> • 2% → `<GAS_PART>` AGC immediately liquid
-> • 98% → `<REMAINING>` AGC returned to protocol
+> No ETH required. You extract only the initial 10% gas subsidy.
+> • 10% → `<GAS_PART>` AGC immediately liquid
+> • 90% → `<REMAINING>` AGC returned to protocol
 > → Minimal commitment, minimal reward.
 >
 > Which path do you choose?

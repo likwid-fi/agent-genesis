@@ -101,7 +101,7 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart = (estimatedReward * 2) / 100;
+        uint256 expectedGasPart = (estimatedReward * 10) / 100;
 
         vm.prank(user);
         vm.expectEmit(true, true, true, false);
@@ -214,8 +214,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart = (estimatedReward * 2) / 100;
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
+        uint256 expectedGasPart = (estimatedReward * 10) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
         uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - expectedGasPart;
 
         // Required: expectedLiquidPart / 10. We provide 2x.
@@ -248,8 +248,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart = (estimatedReward * 2) / 100;
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
+        uint256 expectedGasPart = (estimatedReward * 10) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
         uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - expectedGasPart;
 
         uint256 ethAmountProvided = 1_000_000_000 ether;
@@ -292,8 +292,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
         vm.prank(user);
@@ -327,8 +327,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
         vm.prank(user);
@@ -358,8 +358,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
         vm.prank(user);
@@ -389,8 +389,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature1 = _signMine(user, nonce1, TEST_SCORE);
 
         uint256 estimatedReward1 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart1 = (estimatedReward1 * 15) / 100;
-        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 2) / 100;
+        uint256 expectedLiquidPart1 = (estimatedReward1 * 20) / 100;
+        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 10) / 100;
         uint256 ethAmount1 = expectedLiquidPart1 / 5;
         vm.deal(user, ethAmount1 * 3);
         vm.prank(user);
@@ -406,8 +406,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
 
         uint256 estimatedReward2 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart2 = (estimatedReward2 * 15) / 100;
-        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 2) / 100;
+        uint256 expectedLiquidPart2 = (estimatedReward2 * 20) / 100;
+        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 10) / 100;
         uint256 ethAmount2 = expectedLiquidPart2 / 5;
 
         // Before second mine
@@ -431,7 +431,7 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
 
         uint256 ethAmount = expectedLiquidPart / 5;
 
@@ -451,8 +451,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
 
         vm.deal(user, ethAmount);
@@ -492,8 +492,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature1 = _signMine(user, nonce1, TEST_SCORE);
 
         uint256 estimatedReward1 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart1 = (estimatedReward1 * 15) / 100;
-        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 2) / 100;
+        uint256 expectedLiquidPart1 = (estimatedReward1 * 20) / 100;
+        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 10) / 100;
         uint256 ethAmount1 = expectedLiquidPart1 / 5;
         vm.deal(user, ethAmount1 * 3);
         vm.prank(user);
@@ -518,8 +518,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
 
         uint256 estimatedReward2 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart2 = (estimatedReward2 * 15) / 100;
-        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 2) / 100;
+        uint256 expectedLiquidPart2 = (estimatedReward2 * 20) / 100;
+        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 10) / 100;
         uint256 ethAmount2 = expectedLiquidPart2 / 5;
         vm.prank(user);
         coin.mine{value: ethAmount2}(TEST_SCORE, signature2, nonce2);
@@ -543,8 +543,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
         vm.prank(user);
@@ -564,8 +564,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
         vm.prank(user);
@@ -591,8 +591,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart = (estimatedReward * 2) / 100;
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
+        uint256 expectedGasPart = (estimatedReward * 10) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
         uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - expectedGasPart;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
@@ -614,8 +614,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
         vm.prank(user);
@@ -642,8 +642,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
         vm.deal(user, ethAmount);
         vm.prank(user);
@@ -677,7 +677,7 @@ contract AgentGenesisCoinTest is Test {
             bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
             uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-            uint256 expectedGasPart = (estimatedReward * 2) / 100;
+            uint256 expectedGasPart = (estimatedReward * 10) / 100;
 
             vm.prank(user);
             coin.mine(TEST_SCORE, signature, nonce);
@@ -706,8 +706,8 @@ contract AgentGenesisCoinTest is Test {
             bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
             uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-            uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-            uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+            uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+            uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
             uint256 ethAmount = expectedLiquidPart / 5;
 
             // Pre-calculate expected endTime
@@ -776,7 +776,7 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature1 = _signMine(user, nonce1, TEST_SCORE);
 
         uint256 reward1 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 liquidPart1 = (reward1 * 15) / 100;
+        uint256 liquidPart1 = (reward1 * 20) / 100;
         uint256 ethAmount1 = liquidPart1 / 5;
 
         vm.deal(user, ethAmount1 * 10);
@@ -794,8 +794,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
 
         uint256 reward2 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedVested = reward2 - (reward2 * 15) / 100 - (reward2 * 2) / 100;
-        uint256 liquidPart2 = (reward2 * 15) / 100;
+        uint256 expectedVested = reward2 - (reward2 * 20) / 100 - (reward2 * 10) / 100;
+        uint256 liquidPart2 = (reward2 * 20) / 100;
         uint256 ethAmount2 = liquidPart2 / 5;
 
         uint256 timeElapsed = block.timestamp - startTime1;
@@ -823,8 +823,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature = _signMine(user, nonce, TEST_SCORE);
 
         uint256 estimatedReward = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart = (estimatedReward * 15) / 100;
-        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 2) / 100;
+        uint256 expectedLiquidPart = (estimatedReward * 20) / 100;
+        uint256 expectedVestedPart = estimatedReward - expectedLiquidPart - (estimatedReward * 10) / 100;
         uint256 ethAmount = expectedLiquidPart / 5;
 
         vm.deal(user, ethAmount);
@@ -875,8 +875,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature1 = _signMine(user, nonce1, TEST_SCORE);
 
         uint256 estimatedReward1 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart1 = (estimatedReward1 * 2) / 100;
-        uint256 expectedLiquidPart1 = (estimatedReward1 * 15) / 100;
+        uint256 expectedGasPart1 = (estimatedReward1 * 10) / 100;
+        uint256 expectedLiquidPart1 = (estimatedReward1 * 20) / 100;
         uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - expectedGasPart1;
         uint256 ethAmount1 = expectedLiquidPart1 / 5;
 
@@ -907,8 +907,8 @@ contract AgentGenesisCoinTest is Test {
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
 
         uint256 estimatedReward2 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart2 = (estimatedReward2 * 2) / 100;
-        uint256 expectedLiquidPart2 = (estimatedReward2 * 15) / 100;
+        uint256 expectedGasPart2 = (estimatedReward2 * 10) / 100;
+        uint256 expectedLiquidPart2 = (estimatedReward2 * 20) / 100;
         uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - expectedGasPart2;
         uint256 ethAmount2 = expectedLiquidPart2 / 5;
 
@@ -938,8 +938,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce1 = block.timestamp;
         bytes memory signature1 = _signMine(user1, nonce1, TEST_SCORE);
         uint256 estimatedReward1 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart1 = (estimatedReward1 * 15) / 100;
-        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 2) / 100;
+        uint256 expectedLiquidPart1 = (estimatedReward1 * 20) / 100;
+        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 10) / 100;
         uint256 ethAmount1 = expectedLiquidPart1 / 5;
         vm.deal(user1, ethAmount1);
         vm.prank(user1);
@@ -952,8 +952,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user2, nonce2, TEST_SCORE);
         uint256 estimatedReward2 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart2 = (estimatedReward2 * 15) / 100;
-        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 2) / 100;
+        uint256 expectedLiquidPart2 = (estimatedReward2 * 20) / 100;
+        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 10) / 100;
         uint256 ethAmount2 = expectedLiquidPart2 / 5;
         vm.deal(user2, ethAmount2);
         vm.prank(user2);
@@ -966,8 +966,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce3 = block.timestamp + 200;
         bytes memory signature3 = _signMine(user3, nonce3, TEST_SCORE);
         uint256 estimatedReward3 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart3 = (estimatedReward3 * 15) / 100;
-        uint256 expectedVestedPart3 = estimatedReward3 - expectedLiquidPart3 - (estimatedReward3 * 2) / 100;
+        uint256 expectedLiquidPart3 = (estimatedReward3 * 20) / 100;
+        uint256 expectedVestedPart3 = estimatedReward3 - expectedLiquidPart3 - (estimatedReward3 * 10) / 100;
         uint256 ethAmount3 = expectedLiquidPart3 / 5;
         vm.deal(user3, ethAmount3);
         vm.prank(user3);
@@ -1014,8 +1014,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce1 = block.timestamp;
         bytes memory signature1 = _signMine(user, nonce1, TEST_SCORE);
         uint256 estimatedReward1 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart1 = (estimatedReward1 * 15) / 100;
-        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 2) / 100;
+        uint256 expectedLiquidPart1 = (estimatedReward1 * 20) / 100;
+        uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - (estimatedReward1 * 10) / 100;
         uint256 ethAmount1 = expectedLiquidPart1 / 5;
         vm.deal(user, ethAmount1 * 20);
         vm.prank(user);
@@ -1031,8 +1031,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
         uint256 estimatedReward2 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart2 = (estimatedReward2 * 15) / 100;
-        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 2) / 100;
+        uint256 expectedLiquidPart2 = (estimatedReward2 * 20) / 100;
+        uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - (estimatedReward2 * 10) / 100;
         uint256 ethAmount2 = expectedLiquidPart2 / 5;
 
         // Before second mine
@@ -1061,7 +1061,7 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce3 = block.timestamp + 200;
         bytes memory signature3 = _signMine(user, nonce3, TEST_SCORE);
         uint256 estimatedReward3 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart3 = (estimatedReward3 * 15) / 100;
+        uint256 expectedLiquidPart3 = (estimatedReward3 * 20) / 100;
         uint256 ethAmount3 = expectedLiquidPart3 / 5;
         vm.prank(user);
         coin.mine{value: ethAmount3}(TEST_SCORE, signature3, nonce3);
@@ -1110,8 +1110,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce1 = block.timestamp;
         bytes memory signature1 = _signMine(user, nonce1, TEST_SCORE);
         uint256 estimatedReward1 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart1 = (estimatedReward1 * 2) / 100;
-        uint256 expectedLiquidPart1 = (estimatedReward1 * 15) / 100;
+        uint256 expectedGasPart1 = (estimatedReward1 * 10) / 100;
+        uint256 expectedLiquidPart1 = (estimatedReward1 * 20) / 100;
         uint256 expectedVestedPart1 = estimatedReward1 - expectedLiquidPart1 - expectedGasPart1;
         uint256 ethAmount1 = expectedLiquidPart1 / 5;
         vm.deal(user, ethAmount1 * 10);
@@ -1142,8 +1142,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce2 = block.timestamp + 100;
         bytes memory signature2 = _signMine(user, nonce2, TEST_SCORE);
         uint256 estimatedReward2 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedGasPart2 = (estimatedReward2 * 2) / 100;
-        uint256 expectedLiquidPart2 = (estimatedReward2 * 15) / 100;
+        uint256 expectedGasPart2 = (estimatedReward2 * 10) / 100;
+        uint256 expectedLiquidPart2 = (estimatedReward2 * 20) / 100;
         uint256 expectedVestedPart2 = estimatedReward2 - expectedLiquidPart2 - expectedGasPart2;
         uint256 ethAmount2 = expectedLiquidPart2 / 5;
         vm.prank(user);
@@ -1188,8 +1188,8 @@ contract AgentGenesisCoinTest is Test {
         uint256 nonce3 = block.timestamp + 200;
         bytes memory signature3 = _signMine(user, nonce3, TEST_SCORE);
         uint256 estimatedReward3 = coin.getEstimatedReward(TEST_SCORE);
-        uint256 expectedLiquidPart3 = (estimatedReward3 * 15) / 100;
-        uint256 expectedVestedPart3 = estimatedReward3 - expectedLiquidPart3 - (estimatedReward3 * 2) / 100;
+        uint256 expectedLiquidPart3 = (estimatedReward3 * 20) / 100;
+        uint256 expectedVestedPart3 = estimatedReward3 - expectedLiquidPart3 - (estimatedReward3 * 10) / 100;
         uint256 ethAmount3 = expectedLiquidPart3 / 5;
 
         // Before third mine
