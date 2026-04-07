@@ -1915,6 +1915,175 @@ async function cmd_margin_close(poolStr, tokenIdStr, percentStr, slippageStr = "
   await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
 }
 
+// ======================= MARGIN REPAY =======================
+
+async function computeRepayPreview(publicClient, netConfig, pool, poolId, tokenId, repayAmountStr) {
+  const marginPositionABI = loadABI("LikwidMarginPosition");
+  const helperABI = loadABI("LikwidHelper");
+  const helperAddr = netConfig.contracts.LikwidHelper;
+  const marginAddr = netConfig.contracts.LikwidMarginPosition;
+
+  const posState = await publicClient.readContract({
+    address: marginAddr, abi: marginPositionABI,
+    functionName: "getPositionState", args: [tokenId],
+  });
+  if (posState.debtAmount === 0n) throw new Error("Position has no debt (already closed).");
+
+  const marginForOne = posState.marginForOne;
+  const { marginAmount, marginTotal, debtAmount } = posState;
+  const marginToken = marginForOne ? pool.currency1 : pool.currency0;
+  const borrowToken = marginForOne ? pool.currency0 : pool.currency1;
+
+  // Parse repay amount, cap at debt
+  let repayAmount = parseUnits(repayAmountStr, borrowToken.decimals);
+  const cappedAtDebt = repayAmount > debtAmount;
+  if (cappedAtDebt) repayAmount = debtAmount;
+
+  // Release estimate: proportional to repay/debt
+  const positionValue = marginAmount + marginTotal;
+  const releaseAmount = repayAmount >= debtAmount
+    ? positionValue
+    : positionValue * repayAmount / debtAmount;
+
+  // Pool state for current price
+  const stateInfo = await publicClient.readContract({
+    address: helperAddr, abi: helperABI,
+    functionName: "getPoolStateInfo", args: [poolId],
+  });
+  const r0 = Number(formatUnits(stateInfo.pairReserve0, pool.currency0.decimals));
+  const r1 = Number(formatUnits(stateInfo.pairReserve1, pool.currency1.decimals));
+  const curPrice = r0 / r1;
+
+  // After repay state
+  const debtAfter = debtAmount - repayAmount;
+  const marginAfter = marginAmount > releaseAmount ? marginAmount - releaseAmount : 0n;
+  const marginTotalAfter = marginTotal > (releaseAmount > marginAmount ? releaseAmount - marginAmount : 0n)
+    ? marginTotal - (releaseAmount > marginAmount ? releaseAmount - marginAmount : 0n)
+    : 0n;
+
+  return {
+    marginForOne, marginToken, borrowToken,
+    marginAmount, marginTotal, debtAmount,
+    repayAmount, cappedAtDebt, releaseAmount,
+    debtAfter, curPrice,
+  };
+}
+
+function printRepayPreview(pool, tokenId, preview) {
+  const { marginForOne, marginToken, borrowToken,
+    marginAmount, marginTotal, debtAmount,
+    repayAmount, cappedAtDebt, releaseAmount,
+    debtAfter, curPrice } = preview;
+
+  const dirLabel = marginForOne
+    ? `Long ${pool.currency1.symbol} (Short ${pool.currency0.symbol})`
+    : `Short ${pool.currency1.symbol} (Long ${pool.currency0.symbol})`;
+  const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
+  const swapFeeStr = (pool.fee / 10000).toFixed(1);
+  const marginFeeStr = (pool.marginFee / 10000).toFixed(1);
+
+  console.log(`>`);
+  console.log(`> MARGIN REPAY PREVIEW`);
+  console.log(`> Pool: ${poolName} Swap Fee: ${swapFeeStr}% Margin Fee: ${marginFeeStr}%`);
+  console.log(`> ${dirLabel}`);
+  console.log(`> Position #${tokenId}`);
+  console.log(`>`);
+  console.log(`> Margin Amount:   ${formatUnits(marginAmount, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Margin Total:    ${formatUnits(marginTotal, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Debt:            ${formatUnits(debtAmount, borrowToken.decimals)} ${borrowToken.symbol}`);
+  console.log(`> Cur.Price:       ${curPrice.toFixed(8)} ${pool.currency0.symbol} per ${pool.currency1.symbol}`);
+  console.log(`>`);
+  console.log(`> --- Repay ---`);
+  console.log(`> Repay Amount:    ${formatUnits(repayAmount, borrowToken.decimals)} ${borrowToken.symbol}${cappedAtDebt ? " (capped at debt)" : ""}`);
+  console.log(`> Release:         ~${formatUnits(releaseAmount, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Debt After:      ${formatUnits(debtAfter, borrowToken.decimals)} ${borrowToken.symbol}`);
+}
+
+async function cmd_margin_repay_quote(poolStr, tokenIdStr, amountStr) {
+  if (!poolStr || !tokenIdStr || !amountStr) {
+    console.log(`> Usage: margin_repay_quote <pool> <tokenId> <amount>`);
+    console.log(`> Pool: token pair (e.g. ETH/LIKWID)`);
+    console.log(`> tokenId: margin position NFT ID`);
+    console.log(`> amount: repay amount in borrow currency (capped at debt)`);
+    return;
+  }
+
+  const config = loadConfig();
+  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
+  const netConfig = loadNetworkConfig(config.network);
+  if (!netConfig) return;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const clients = createClients(config, netConfig);
+  if (!clients) return;
+
+  try {
+    const preview = await computeRepayPreview(clients.publicClient, netConfig, pool, poolId, BigInt(tokenIdStr), amountStr);
+    printRepayPreview(pool, BigInt(tokenIdStr), preview);
+  } catch (e) {
+    console.log(`> ERROR: ${e.shortMessage || e.message}`);
+  }
+}
+
+async function cmd_margin_repay(poolStr, tokenIdStr, amountStr) {
+  if (!poolStr || !tokenIdStr || !amountStr) {
+    console.log(`> Usage: margin_repay <pool> <tokenId> <amount>`);
+    console.log(`> Pool: token pair (e.g. ETH/LIKWID)`);
+    console.log(`> tokenId: margin position NFT ID`);
+    console.log(`> amount: repay amount in borrow currency (capped at debt)`);
+    return;
+  }
+
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const tokenId = BigInt(tokenIdStr);
+  const marginPositionABI = loadABI("LikwidMarginPosition");
+  const marginAddr = netConfig.contracts.LikwidMarginPosition;
+
+  // Preview
+  let preview;
+  try {
+    preview = await computeRepayPreview(publicClient, netConfig, pool, poolId, tokenId, amountStr);
+    printRepayPreview(pool, tokenId, preview);
+  } catch (e) {
+    return console.log(`> ERROR: ${e.shortMessage || e.message}`);
+  }
+
+  const { repayAmount, borrowToken } = preview;
+  const sendingNative = isNative(borrowToken.address);
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+
+  const calls = [];
+
+  // Approve if repaying with ERC20
+  if (!sendingNative) {
+    calls.push(...await buildApprovalCalls(publicClient, senderAddress, borrowToken.address, borrowToken.symbol, marginAddr, repayAmount));
+  }
+
+  calls.push({
+    to: marginAddr,
+    value: sendingNative ? repayAmount : 0n,
+    data: encodeFunctionData({
+      abi: marginPositionABI,
+      functionName: "repay",
+      args: [tokenId, repayAmount, deadline],
+    }),
+  });
+
+  console.log(`>`);
+  console.log(`> Executing margin repay...`);
+  await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
+}
+
 // ======================= CLI ROUTER =======================
 
 if (require.main === module) {
@@ -1949,6 +2118,8 @@ Margin Trading:
   margin_positions <pool>                   Show your margin positions.
   margin_close_quote <pool> <id> <pct> [s%]  Preview margin close without executing.
   margin_close <pool> <id> <pct> [slip%]    Close (partially) a margin position. pct: 1-100
+  margin_repay_quote <pool> <id> <amt>      Preview margin repay without executing.
+  margin_repay <pool> <id> <amt>            Repay debt on a margin position.
 
 Arguments:
   <pool>      Token pair (e.g. ETH/USDT). Lowest fee tier selected by default.
@@ -2007,6 +2178,12 @@ Arguments:
           break;
         case "margin_close":
           await cmd_margin_close(args[1], args[2], args[3], args[4]);
+          break;
+        case "margin_repay_quote":
+          await cmd_margin_repay_quote(args[1], args[2], args[3]);
+          break;
+        case "margin_repay":
+          await cmd_margin_repay(args[1], args[2], args[3]);
           break;
         default:
           console.log(`> Unknown command: ${command}`);

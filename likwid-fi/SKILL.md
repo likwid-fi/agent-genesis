@@ -584,6 +584,69 @@ Or on failure:
 - 100% close fully repays debt and returns remaining margin to the user.
 - `InsufficientCloseReceived` error means the position may be near liquidation — the swap output cannot cover the debt.
 
+### Step 5: Repay Debt
+
+Repay part or all of the borrow debt on a margin position. This reduces leverage and releases proportional margin back to you.
+
+#### 5a. Ask the User
+
+Collect from the user:
+
+1. **Pool** — Which pool? (e.g., ETH/LIKWID)
+2. **tokenId** — Which position? (use `margin_positions` to find it)
+3. **Amount** — How much debt to repay? (in borrow currency, capped at current debt)
+
+#### 5b. Preview (margin_repay_quote)
+
+```bash
+node likwid-fi.js margin_repay_quote <pool> <tokenId> <amount>
+```
+
+**Example:**
+```bash
+node likwid-fi.js margin_repay_quote ETH/LIKWID 20 0.0003
+```
+
+**Report to human:**
+
+> **Margin Repay Preview**
+> Pool: ETH/LIKWID Swap Fee: 0.3% Margin Fee: 0.3%
+> Long LIKWID (Short ETH)
+> Position #20
+>
+> Margin Amount: `3 LIKWID`
+> Margin Total: `5.982 LIKWID`
+> Debt: `0.00060581 ETH`
+> Cur.Price: `0.00018317 ETH per LIKWID`
+>
+> --- Repay ---
+> Repay Amount: `0.0003 ETH`
+> Release: `~4.446 LIKWID`
+> Debt After: `0.00030581 ETH`
+>
+> Proceed? (yes/no)
+
+**Wait for human confirmation before executing.**
+
+**Key notes:**
+- If the user enters more than the current debt, it is automatically capped at the debt amount.
+- Repaying with native ETH sends value directly. Repaying with ERC-20 requires approval first (handled automatically).
+
+#### 5c. Execute (margin_repay)
+
+```bash
+node likwid-fi.js margin_repay <pool> <tokenId> <amount>
+```
+
+On-chain contract call: `repay(tokenId, repayAmount, deadline)` (payable — sends ETH if borrow currency is native).
+
+**Report to human:**
+
+> **Margin Repay Successful!**
+> Position #`<TOKEN_ID>` — repaid `<AMOUNT>` `<BORROW_TOKEN>`
+> Transaction: `<TX_HASH>`
+> Block: `<BLOCK_NUMBER>`
+
 ---
 
 ## 5. Error Handling
@@ -624,6 +687,8 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `margin_positions <pool>` | Show your margin positions. |
 | `margin_close_quote <pool> <id> <pct> [slip]` | Preview margin close. |
 | `margin_close <pool> <id> <pct> [slip]` | Execute margin close. |
+| `margin_repay_quote <pool> <id> <amt>` | Preview margin repay. |
+| `margin_repay <pool> <id> <amt>` | Execute margin repay. |
 
 ### Arguments
 
