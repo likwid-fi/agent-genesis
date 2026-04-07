@@ -417,8 +417,8 @@ $$ Total\ Value\ of\ Short\ Position = 11\\% \times 5 = 55\\% $$
 
 | 阶段 | 时间 | 治理措施 |
 |:---|:---|:---|
-| **Phase 0**（当前） | 2026 Q1 | Owner 单签控制、中心化 verifier |
-| **Phase 1** | 2026 Q2 | Owner 转移至 3/5 多签；verifier 代码开源；安全审计完成 |
+| **Phase 0**（当前） | 2026 Q1–Q2 | Owner 单签控制、中心化 verifier；Base 主网已上线 |
+| **Phase 1** | 2026 Q2 | Owner 转移至 3/5 多签；✅ verifier 代码开源；✅ 安全审计已完成 |
 | **Phase 2** | 2026 Q3–Q4 | Verifier 多节点委员会；epochLength 等参数锁定在合约中 |
 | **Phase 3** | 2026 Q4 | 社区治理投票；多签仅执行投票结果；PoA 链上化 |
 | **Phase 4** | 2026 Q4 | 完全 DAO 治理；Owner 权限销毁 |
@@ -435,8 +435,8 @@ $$ Total\ Value\ of\ Short\ Position = 11\\% \times 5 = 55\\% $$
 
 | 时间 | 里程碑 | 可验证交付物 |
 |:---|:---|:---|
-| **2026 Q1** | 原型完成、白皮书发布 | ✅ 已完成：合约 + CLI + 白皮书 |
-| **2026 Q2** | Verifier 开源 + 安全审计 + 团队 Dox + Owner 转多签 | 链上多签交易 + 审计报告 |
+| **2026 Q1** | 原型完成、白皮书发布、Base 主网上线 | ✅ 已完成：合约 + CLI + 白皮书 + Base 主网上线 |
+| **2026 Q2** | ✅ Verifier 开源 + ✅ 安全审计 + 团队 Dox + Owner 转多签 | 链上多签交易 + ✅ 审计报告 |
 | **2026 Q2** | 首批外部 Agent 接入 + 服务市场 MVP | Agent 挖矿/交易链上数据 |
 | **2026 Q3** | 策略市场上线 + Verifier 多节点 | 5+ 独立策略提供者 |
 | **2026 Q4** | PoA 链上化（zkTLS + ERC-8004） | 链上可验证的 Agent 身份证明 |

@@ -419,8 +419,8 @@ This does not align with the principles of decentralization. We are fully aware 
 
 | Phase | Timeline | Governance Measures |
 |:---|:---|:---|
-| **Phase 0** (Current) | 2026 Q1 | Single-signature Owner control; centralized verifier |
-| **Phase 1** | 2026 Q2 | Owner transferred to 3/5 multisig; verifier code open-sourced; security audit completed |
+| **Phase 0** (Current) | 2026 Q1–Q2 | Single-signature Owner control; centralized verifier; Base mainnet live |
+| **Phase 1** | 2026 Q2 | Owner transferred to 3/5 multisig; ✅ verifier code open-sourced; ✅ security audit completed |
 | **Phase 2** | 2026 Q3–Q4 | Verifier multi-node committee; epochLength and other parameters locked in contract |
 | **Phase 3** | 2026 Q4 | Community governance voting; multisig only executes vote outcomes; PoA moved on-chain |
 | **Phase 4** | 2026 Q4 | Full DAO governance; Owner privileges permanently destroyed |
@@ -437,8 +437,8 @@ To ensure the community can monitor decentralization progress, we commit to:
 
 | Timeline | Milestone | Verifiable Deliverable |
 |:---|:---|:---|
-| **2026 Q1** | Prototype complete, whitepaper published | ✅ Completed: Contracts + CLI + Whitepaper |
-| **2026 Q2** | Verifier open-sourced + Security audit + Team Dox + Owner transferred to multisig | On-chain multisig transaction + Audit report |
+| **2026 Q1** | Prototype complete, whitepaper published, Base mainnet launch | ✅ Completed: Contracts + CLI + Whitepaper + Base Mainnet Launch |
+| **2026 Q2** | ✅ Verifier open-sourced + ✅ Security audit + Team Dox + Owner transferred to multisig | On-chain multisig transaction + ✅ Audit report |
 | **2026 Q2** | First external Agent onboarding + Service marketplace MVP | On-chain Agent mining/trading data |
 | **2026 Q3** | Strategy marketplace launch + Verifier multi-node | 5+ independent strategy providers |
 | **2026 Q4** | PoA on-chain (zkTLS + ERC-8004) | On-chain verifiable Agent identity proofs |

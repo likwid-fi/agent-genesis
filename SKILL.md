@@ -346,7 +346,7 @@ node likwid-fi.js margin_positions ETH/AGC           # View positions
 
 - **Wallet shared**: likwid-fi uses the same wallet file (`~/.openclaw/.likwid_genesis_wallet.json`). Run `setup` once to configure:
   ```bash
-  node likwid-fi.js setup sepolia ~/.openclaw/.likwid_genesis_wallet.json smart
+  node likwid-fi.js setup base ~/.openclaw/.likwid_genesis_wallet.json
   ```
 - **Pool names**: Use token pairs like `ETH/AGC`, `ETH/USDT`, `ETH/LIKWID`. Run `pools` to see all available.
 - **Direction**: `0to1` = currency0→currency1, `1to0` = currency1→currency0. For `ETH/AGC`: `0to1` buys AGC, `1to0` sells AGC.

@@ -24,9 +24,9 @@ Interact with the **Likwid Protocol** — a unified DeFi protocol for swaps, liq
 
 | Network | Config File |
 |---------|-------------|
-| Sepolia (testnet) | `pools/sepolia.json` |
+| Base (mainnet) | `pools/base.json` |
 | Ethereum (mainnet) | `pools/ethereum.json` *(coming soon)* |
-| Base | `pools/base.json` *(coming soon)* |
+| Sepolia (testnet) | `pools/sepolia.json` *(legacy)* |
 
 ---
 
@@ -57,7 +57,7 @@ After bootstrap, all commands run from `~/.openclaw/skills/agent-genesis/likwid-
 After bootstrap completes, ask the user for three things:
 
 1. **Network** — Which network to operate on?
-   > Available: `sepolia`, `ethereum`, `base`
+   > Available: `base`, `sepolia`, `ethereum`
 
 2. **Private Key File** — Where is your wallet's private key stored?
    > Provide the **file path** containing the private key (hex string, with or without `0x` prefix).
@@ -323,7 +323,7 @@ Create a new Likwid pool by initializing it on-chain. Tokens are resolved by nam
 node likwid-fi.js pools
 ```
 
-The tokens available for pairing are defined in `pools/<network>.json` under `tokens`. Current Sepolia tokens: ETH, USDT, LIKWID.
+The tokens available for pairing are defined in `pools/<network>.json` under `tokens`. Current Base tokens: ETH, USDC, AGC.
 
 ### Step 2: Create the Pair
 
@@ -765,7 +765,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 
 | Arg | Values | Description |
 |:---|:---|:---|
-| `<net>` | `sepolia`, `ethereum`, `base` | Target network. |
+| `<net>` | `base`, `sepolia`, `ethereum` | Target network. |
 | `<key>` | File path | Path to file containing private key. |
 | `<pool>` | `ETH/USDT`, `ETH-LIKWID` | Token pair. Lowest fee tier selected by default. |
 | `<dir>` | `sell0`, `sell1`, `buy0`, `buy1` | Swap direction. `sell0`/`sell1` = exact input, `buy0`/`buy1` = exact output. |

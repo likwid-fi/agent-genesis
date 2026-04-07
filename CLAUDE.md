@@ -22,7 +22,12 @@ cd contracts && forge test --match-test testFunctionName  # Run a single test
 cd contracts && forge test --gas-report  # Gas usage report
 ```
 
-Deploy to Sepolia:
+Deploy to Base mainnet:
+```bash
+cd contracts && forge script script/DeployGenesisBase.s.sol --broadcast --rpc-url <RPC_URL> --private-key <KEY>
+```
+
+Deploy to Sepolia (testnet):
 ```bash
 cd contracts && forge script script/DeployGenesisSepolia.s.sol --broadcast --rpc-url <RPC_URL> --private-key <KEY>
 ```
@@ -36,7 +41,7 @@ node genesis.js <command> [args...]      # Mining CLI
 node likwid-fi/likwid-fi.js <command> [args...]  # DeFi CLI
 ```
 
-There are no automated test suites, linting, or build steps for the Node.js code. Testing is manual against live Sepolia testnet.
+There are no automated test suites, linting, or build steps for the Node.js code. Testing is manual against live Base mainnet (or Sepolia testnet).
 
 ## Coding Rules
 
@@ -48,7 +53,7 @@ There are no automated test suites, linting, or build steps for the Node.js code
 
 1. **Test scripts must not be placed alongside production files.** Always write test scripts under the project's `tmp/` directory (e.g., `tmp/test_likwid_*.js`). Production code lives in the project root.
 2. **Test scripts may expose bugs that warrant fixing production code, but never modify production code solely to serve a test.** If a test needs a code change, the change must be justified as a genuine bug fix or feature improvement — not a test convenience.
-3. **Always test against real on-chain environments, never mock.** All chain interactions (deploy, swap, LP, pool queries) must be executed on a live testnet (Sepolia). No mock providers, fake bundlers, or simulated responses.
+3. **Always test against real on-chain environments, never mock.** All chain interactions (deploy, swap, LP, pool queries) must be executed on a live chain (Base mainnet or Sepolia testnet). No mock providers, fake bundlers, or simulated responses.
 
 ## Architecture
 
@@ -100,7 +105,7 @@ Both CLIs follow a **single-file architecture** — all logic in one file, no bu
 - Fee values in basis points (3000 = 0.30%)
 - Private keys read from files, never inline
 - Prototype/test scripts go in `tmp/` directories, never alongside production files
-- Test against real on-chain environments (Sepolia), never mock
+- Test against real on-chain environments (Base mainnet or Sepolia testnet), never mock
 
 ## Current Branch
 
