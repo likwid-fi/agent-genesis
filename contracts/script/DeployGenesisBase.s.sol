@@ -9,12 +9,14 @@ import {IVault} from "@likwid-fi/core/interfaces/IVault.sol";
 import {PoolKey} from "@likwid-fi/core/types/PoolKey.sol";
 import {Currency, CurrencyLibrary} from "@likwid-fi/core/types/Currency.sol";
 
-// forge script script/DeployGenesisSepolia.s.sol --broadcast --rpc-url https://sepolia.drpc.org --private-key $PRIVATE_KEY
+// forge script script/DeployGenesisBase.s.sol --broadcast --rpc-url https://base.drpc.org --private-key $PRIVATE_KEY
 contract DeployGenesisScript is Script {
-    address public likwidPairPosition = 0xA8296e28c62249f89188De0499a81d6AD993a515;
-    address public mineSinger = 0x13f2FB603b07bCfB9dE165884717feE84B17D1C8;
-    // EntryPoint v0.9 on Sepolia
+    address public constant likwidPairPosition = 0xB397FE16BE79B082f17F1CD96e6489df19E07BCD;
+    // EntryPoint v0.9 on Base
     address public constant entryPoint = 0x433709009B8330FDa32311DF1C2AFA402eD8D009;
+
+    address public constant mineSinger = 0x964718f13616f76D77bB0F4367d2fdb0FB74d006;
+    address public constant agcHolder = 0xEA7744c4FA1101f9E6dF5688fc19e3EE94106439;
 
     function run() external {
         address deployer = msg.sender;
@@ -33,30 +35,6 @@ contract DeployGenesisScript is Script {
         agc.setPaymaster(address(paymaster));
         console.log("Paymaster set in AGC");
 
-        // Initialize Pool (ETH/AGC)
-        IPairPositionManager pm = IPairPositionManager(likwidPairPosition);
-        IVault vault = pm.vault();
-        PoolKey memory poolKey = PoolKey({
-            currency0: CurrencyLibrary.ADDRESS_ZERO,
-            currency1: Currency.wrap(address(agc)),
-            fee: agc.POOL_FEE(),
-            marginFee: agc.POOL_MARGIN_FEE()
-        });
-        vault.initialize(poolKey);
-        console.log("Pool initialized");
-
-        // Add initial liquidity: 1 ETH = 1,000,000 AGC
-        uint256 ethAmount = 1 ether;
-        uint256 agcAmount = 1_000_000 ether;
-        agc.approve(address(pm), agcAmount);
-        (uint256 tokenId,) =
-            pm.addLiquidity{value: ethAmount}(poolKey, deployer, ethAmount, agcAmount, 0, 0, block.timestamp + 300);
-        console.log("LP added, tokenId:", tokenId);
-
-        // Update Paymaster cached reserves after LP is added
-        paymaster.updateCachedReserves();
-        console.log("Paymaster cached reserves updated");
-
         // Fund Paymaster with 0.1 ETH (deposit for gas payments)
         (bool success,) = address(paymaster).call{value: 0.1 ether}("");
         require(success, "Funding Paymaster failed");
@@ -65,6 +43,12 @@ contract DeployGenesisScript is Script {
         // Stake on EntryPoint (one-time, required because paymaster returns context)
         paymaster.addStake{value: 0.01 ether}(86400);
         console.log("AgentPaymaster staked 0.01 ETH (unstake delay: 1 day)");
+
+        // Transfer AGC balance to holder
+        uint256 agcBalance = agc.balanceOf(deployer);
+        console.log("Deployer AGC balance:", agcBalance);
+        agc.transfer(agcHolder, agcBalance);
+        console.log("Transferred AGC balance to holder:", agcHolder);
 
         vm.stopBroadcast();
     }
