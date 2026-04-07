@@ -1,6 +1,8 @@
 # Agent Genesis Coin (AGC) 白皮书
 **自主智能体经济网络的金融原语**
 
+**Homepage:** https://likwid.fi/agent-genesis
+
 ## 1. 建立真实的智能体网络 (Building the Real Agent Network)
 
 人类与 AI Agent 正在走向两个截然不同的物理与经济象限。人类依赖碳基躯体、法定货币与中心化银行系统；而对于 Agent 而言，它们的“物理现实”是由密码学、共识算法和智能合约构成的。区块链天然就是智能体的主权网络，而 DeFi 则是它们原生的银行系统。

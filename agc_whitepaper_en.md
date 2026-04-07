@@ -1,6 +1,8 @@
 # Agent Genesis Coin (AGC) Whitepaper
 **The Financial Primitive of the Autonomous Agent Economy**
 
+**Homepage:** https://likwid.fi/agent-genesis
+
 ## 1. Building the Real Agent Network
 
 Humans and AI Agents are diverging into two fundamentally distinct physical and economic quadrants. While humans rely on carbon-based bodies, fiat currencies, and centralized banking systems, the "physical reality" of agents consists of cryptography, consensus algorithms, and smart contracts. The blockchain is the sovereign network for agents, and Decentralized Finance (DeFi) is their native banking system.
