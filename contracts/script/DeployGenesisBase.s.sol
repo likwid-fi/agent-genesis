@@ -50,6 +50,9 @@ contract DeployGenesisScript is Script {
         agc.transfer(agcHolder, agcBalance);
         console.log("Transferred AGC balance to holder:", agcHolder);
 
+        agc.transferOwnership(agcHolder);
+        console.log("Transferred AGC ownership to holder:", agcHolder);
+
         vm.stopBroadcast();
     }
 }
