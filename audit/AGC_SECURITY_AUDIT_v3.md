@@ -4,9 +4,9 @@
 **Date:** March 25, 2026
 **Contracts Audited:**
 - `AgentGenesisCoin.sol` — ERC-20 token with proof-of-useful-work mining, vesting, and LP provisioning
-- `AgentPaymaster.sol` — ERC-4337 paymaster enabling gasless transactions via AGC token
+- `AgentPaymaster.sol` — ERC-4337 paymaster enabling sponsored transactions via AGC token
 
-**Solidity Version:** ^0.8.20
+**Solidity Version:** `AgentGenesisCoin.sol` ^0.8.20, `AgentPaymaster.sol` ^0.8.28
 **Framework:** Foundry
 **Dependencies:** OpenZeppelin Contracts, Likwid Protocol Core (`@likwid-fi/core`), ERC-4337 Account Abstraction (`@account-abstraction`)
 
@@ -32,15 +32,15 @@
 
 ## 1. Executive Summary
 
-The AGC smart contract system was audited across three iterative rounds. All Critical and High severity issues identified in the initial audit have been resolved or confirmed as intentional design decisions by the development team. The contracts demonstrate strong security practices including reentrancy protection, proper access control, replay attack prevention, and safe math operations.
+The AGC smart contract system was audited across three iterative rounds. All Critical and High severity issues identified in earlier rounds were either remediated or accepted as explicit design decisions. The current codebase demonstrates strong security properties in access control, replay protection, reentrancy resistance, and supply accounting.
 
 | Severity | Round 1 | Round 2 | Round 3 (Final) |
 |----------|---------|---------|-----------------|
 | Critical | 2 | 0 | **0** |
 | High | 4 | 2 | **0** |
 | Medium | 4 | 5 | **0** |
-| Low | 4 | 4 | **5** |
-| Informational | 4 | 4 | **6** |
+| Low | 4 | 4 | **4** |
+| Informational | 4 | 4 | **5** |
 
 **Final Verdict: The contracts are suitable for deployment.** No Critical, High, or Medium issues remain. All outstanding items are Low or Informational and do not affect the security of user funds or protocol operations.
 
@@ -52,8 +52,8 @@ The AGC smart contract system was audited across three iterative rounds. All Cri
 
 | File | Lines | SHA-256 |
 |------|-------|---------|
-| `contracts/src/AgentGenesisCoin.sol` | 433 | (computed at audit time) |
-| `contracts/src/AgentPaymaster.sol` | 232 | (computed at audit time) |
+| `contracts/src/AgentGenesisCoin.sol` | 420 | (computed at audit time) |
+| `contracts/src/AgentPaymaster.sol` | 262 | (computed at audit time) |
 
 ### Out of Scope
 
@@ -110,9 +110,9 @@ An ERC-20 token implementing a **proof-of-useful-work** mining model for AI agen
 
 ### 4.2 AgentPaymaster.sol
 
-An ERC-4337 paymaster that enables gasless transactions for AGC holders:
+An ERC-4337 paymaster that enables sponsored transactions for AGC holders:
 
-- **Mode 0 (Free):** First-ever `mine()` call is gas-free. The paymaster verifies the operation is a valid `mine()` call with a correct oracle signature before sponsoring.
+- **Mode 0 (Free):** One qualifying sponsored `mine()` flow per address is gas-free. The paymaster recognizes supported account calldata shapes, verifies the embedded `mine()` call, and checks the oracle signature before sponsoring.
 - **Mode 1 (AGC-paid):** Subsequent operations are paid in AGC. The paymaster collects AGC upfront (with 10% slippage buffer), swaps it for ETH on Likwid in `_postOp`, and refunds any excess AGC.
 - **Fallback Swap:** If `exactOutput` fails, falls back to `exactInput` with 80% minimum output protection (based on on-chain price quote).
 - **Auto-deposit:** All ETH received by the paymaster is automatically deposited to the EntryPoint.
@@ -139,7 +139,7 @@ The following issues were identified in prior audit rounds and have been success
 
 **Original Issue:** The `SignerUpdated` event was emitted after assignment, causing both parameters to contain the new value.
 
-**Resolution:** Added `address oldSigner = mineSigner` before assignment (line 129-131).
+**Resolution:** Added `address oldSigner = mineSigner` before assignment before emitting `SignerUpdated`.
 
 ```solidity
 // Fixed implementation
@@ -154,7 +154,7 @@ emit SignerUpdated(oldSigner, mineSigner);
 
 **Original Issue:** Option B recorded the full `reward` in `minedTotal` despite only minting 10%, causing accelerated decay.
 
-**Resolution:** Introduced `_updateMinedTotal(actualMint)` as a separate function. Option A passes `reward`, Option B passes `gasPart` only (line 256 vs 261).
+**Resolution:** Introduced `_updateMinedTotal(actualMint)` as a separate function. Option A passes `reward`, Option B passes `gasPart` only.
 
 ---
 
@@ -162,7 +162,7 @@ emit SignerUpdated(oldSigner, mineSigner);
 
 **Original Issue:** The fallback swap in `_postOp` used `amountOutMin: 0`, enabling sandwich attacks.
 
-**Resolution:** Fallback now queries on-chain reserves via `SwapMath.getAmountOut()` and applies 80% minimum protection (lines 199-204).
+**Resolution:** Fallback now queries on-chain reserves via `SwapMath.getAmountOut()` and applies 80% minimum protection.
 
 ---
 
@@ -178,25 +178,13 @@ emit SignerUpdated(oldSigner, mineSigner);
 
 **Original Issue:** Any address could send ETH to the contract, permanently locking it.
 
-**Resolution:** Added `require(msg.sender == LIKWID_POSITION_MANAGER)` guard (line 431).
+**Resolution:** Added `require(msg.sender == LIKWID_POSITION_MANAGER)` guard to the token contract `receive()` path.
 
 ---
 
 ### 5.2 Design Decisions (Confirmed by Team)
 
 The following items were raised during audit rounds and have been confirmed as **intentional design decisions** by the development team. They are documented here for transparency.
-
-#### [BY DESIGN] ERC-4337 Storage Access in Validation Phase
-
-**Description:** `_validatePaymasterUserOp` reads external contract storage (AGC's `mineSigner` via `verifyMineSignature`, and Likwid Vault reserves via `StateLibrary`). This technically violates ERC-4337 storage access rules and would cause rejection by public bundlers (Pimlico, Alchemy, Stackup, etc.).
-
-**Team Rationale:** The protocol operates with a private bundler. Reading external storage in validation is intentional to:
-1. Ensure AGC gas payments are settled at real-time exchange rates
-2. Verify that free mine operations carry valid oracle signatures, preventing gas-draining attacks
-
-**Risk Accepted:** Only compatible with self-hosted bundlers. Documented as a known constraint.
-
----
 
 #### [BY DESIGN] Epoch Rotation Does Not Fast-Forward on Gaps
 
@@ -242,7 +230,17 @@ The following items were raised during audit rounds and have been confirmed as *
 
 **Description:** Every `mine()` call auto-approves the paymaster for unlimited AGC spending on behalf of the caller.
 
-**Team Rationale:** Required for the ERC-4337 gasless flow. The paymaster address is locked after initial setup (`paymasterLocked = true`), preventing the owner from changing it to a malicious contract. The trust assumption is that the paymaster code itself is secure, which this audit validates.
+**Team Rationale:** Required for the ERC-4337 sponsored-transaction flow. The paymaster address is locked after initial setup (`paymasterLocked = true`), preventing the owner from changing it to a malicious contract. The trust assumption is that the paymaster code itself is secure, which this audit validates.
+
+---
+
+#### [BY DESIGN] Paymaster Accepts Drift Between Cached Pricing and Execution Price
+
+**Description:** In Mode 1, `AgentPaymaster` determines the AGC amount to collect in `_validatePaymasterUserOp` from cached reserve snapshots, but performs the actual ETH recovery swap later in `_postOp` using then-current reserves. Because the reserve cache is updated permissionlessly and market conditions may change between validation and execution, the final swap price can diverge from the cached price used to charge the user.
+
+**Team Rationale:** The team intentionally accepts this cache-to-execution pricing drift as an operational trade-off. The design prioritizes a simple paymaster flow using cached pricing rather than introducing stricter quote binding, signer-authorized quotes, or non-permissionless cache updates. In the intended deployment model, the paymaster is a managed service and occasional pricing mismatch is treated as acceptable operating variance rather than a protocol-breaking condition.
+
+**Risk Accepted:** In adverse market conditions, or if the cache is updated at a disadvantageous time, the paymaster may recover less ETH than the actual gas cost and consume part of its EntryPoint deposit. This is an accepted business risk and should be handled via monitoring and replenishment of the paymaster balance.
 
 ---
 
@@ -264,33 +262,9 @@ Each nonce record persists permanently in contract storage. Over the lifetime of
 
 ---
 
-#### L-2: `_getHash` Uses Manual Assembly for ABI Packing
+#### L-2: `_postOp` Fallback Silently Swallows Swap Failures
 
-**File:** `AgentGenesisCoin.sol:303-311`
-
-```solidity
-function _getHash(address signer, uint256 nonce, uint256 score) internal pure returns (bytes32 hash) {
-    assembly {
-        let ptr := mload(0x40)
-        mstore(ptr, shl(96, signer))      // 20 bytes (address)
-        mstore(add(ptr, 20), nonce)        // 32 bytes (uint256)
-        mstore(add(ptr, 52), score)        // 32 bytes (uint256)
-        hash := keccak256(ptr, 84)         // Total: 84 bytes
-    }
-}
-```
-
-The manual assembly is correct (20 + 32 + 32 = 84 bytes, equivalent to `abi.encodePacked(address, uint256, uint256)`), and test coverage confirms output matches `abi.encodePacked`. However, it reduces readability and increases the risk of errors during future modifications.
-
-**Impact:** None currently. The implementation is verified correct.
-
-**Recommendation:** Add an inline comment documenting the field layout and reference the corresponding test.
-
----
-
-#### L-3: `_postOp` Fallback Silently Swallows Swap Failures
-
-**File:** `AgentPaymaster.sol:214`
+**File:** `AgentPaymaster.sol`
 
 ```solidity
 try POSITION_MANAGER.exactInput(inputParams) {} catch {}
@@ -309,9 +283,9 @@ catch {
 
 ---
 
-#### L-4: `_slice` Uses `mcopy` Opcode (Requires Cancun)
+#### L-3: `_slice` Uses `mcopy` Opcode (Requires Cancun)
 
-**File:** `AgentPaymaster.sol:62`
+**File:** `AgentPaymaster.sol`
 
 ```solidity
 assembly {
@@ -327,13 +301,13 @@ The `mcopy` opcode was introduced in EIP-5656 (Cancun hard fork, March 2024). Th
 
 ---
 
-#### L-5: `_isFreeMine` Reverts on Malformed Calldata Instead of Returning False
+#### L-4: `_isFreeMine` Reverts on Malformed Calldata Instead of Returning False
 
-**File:** `AgentPaymaster.sol:75, 82-83, 93`
+**File:** `AgentPaymaster.sol`
 
-`abi.decode` will revert if the calldata does not conform to the expected format (e.g., from a non-SimpleAccount wallet). In the context of `_validatePaymasterUserOp`, this causes the entire UserOp validation to fail rather than gracefully falling through to Mode 1 (paid).
+`abi.decode` will revert if the calldata does not conform to the expected supported formats (for example, a wallet/account implementation using a different calldata layout than the handled execute / executeBatch shapes). In the context of `_validatePaymasterUserOp`, this causes the entire UserOp validation to fail rather than gracefully falling through to Mode 1 (paid).
 
-**Impact:** Users with non-SimpleAccount wallets that happen to use a matching function selector but different encoding will have their UserOps rejected entirely instead of being charged AGC.
+**Impact:** Users routing through unsupported account calldata layouts may have their UserOps rejected entirely instead of being charged AGC.
 
 **Recommendation:** Wrap `abi.decode` calls in a try-catch or validate calldata length before decoding.
 
@@ -343,7 +317,7 @@ The `mcopy` opcode was introduced in EIP-5656 (Cancun hard fork, March 2024). Th
 
 #### I-1: `ERC20Permit` Functionality Is Largely Unused
 
-The contract inherits `ERC20Permit`, but the gasless flow relies on automatic paymaster approval via `mine()`. Permit-based approvals are not used anywhere in the protocol.
+The contract inherits `ERC20Permit`, but the sponsored-transaction flow relies on automatic paymaster approval via `mine()`. Permit-based approvals are not used anywhere in the protocol.
 
 **Note:** The inheritance adds ~2KB to deployed bytecode. Removal would reduce deployment cost but eliminates potential future utility for third-party integrations.
 
@@ -359,7 +333,7 @@ Neither `AgentGenesisCoin` nor `AgentPaymaster` implements a `pause()` function.
 
 #### I-3: `POST_OP_GAS` Is a Hardcoded Constant
 
-**File:** `AgentPaymaster.sol:33`
+**File:** `AgentPaymaster.sol`
 
 ```solidity
 uint256 public constant POST_OP_GAS = 500000;
@@ -377,13 +351,7 @@ At deployment, `totalSupply()` = `LP_INITIAL_ALLOCATION + VAULT_ALLOCATION + ECO
 
 ---
 
-#### I-5: Removal of LayerZero OFT Eliminates Cross-Chain Capability
-
-The v3 refactor removed the LayerZero OFT inheritance, simplifying the contract but eliminating native cross-chain bridging. If cross-chain deployment is needed in the future, a separate bridge integration will be required.
-
----
-
-#### I-6: Ecosystem Fund 900-Day Vesting Timeline
+#### I-5: Ecosystem Fund 900-Day Vesting Timeline
 
 The 5% ecosystem fund (1,050,000,000 AGC) vests linearly over 900 days (~2.46 years) to an owner-specified recipient. Community stakeholders should be aware of this release schedule.
 
@@ -437,36 +405,34 @@ The 5% ecosystem fund (1,050,000,000 AGC) vests linearly over 900 days (~2.46 ye
 
 The paymaster correctly implements the ERC-4337 `BasePaymaster` interface with two operational modes. Key observations:
 
-- **Free mine verification** includes signature validation, preventing attackers from crafting fake `mine()` calldata to drain the paymaster's ETH
+- **Free mine verification** includes signature validation for supported account calldata layouts, preventing attackers from crafting fake sponsored `mine()` calldata to drain the paymaster's ETH
 - **AGC collection** uses `safeTransferFrom` with a pre-computed slippage buffer (10%)
 - **Post-operation swap** has a two-tier fallback (exactOutput → exactInput with 80% min)
 - **ETH auto-deposit** via `receive()` ensures the paymaster stays funded
-
-**Known Constraint:** Requires a private/permissioned bundler due to storage access patterns in the validation phase. This is an accepted trade-off for better pricing accuracy and security.
 
 ---
 
 ## 7. Conclusion
 
-The Agent Genesis Coin and Agent Paymaster contracts have undergone three rounds of iterative security review. The development team has been responsive to findings, resolving all Critical and High severity issues and providing clear rationale for design decisions that deviate from conventional patterns.
+The Agent Genesis Coin and Agent Paymaster contracts have undergone three rounds of iterative security review. The development team resolved all Critical and High severity issues and documented the remaining non-standard behaviors as explicit design decisions.
 
 ### Strengths
 
 1. **Clean separation of concerns** — Mining logic, vesting, LP provisioning, and gas payment are well-modularized
 2. **Strong replay protection** — Per-user nonce mapping + ECDSA signature verification
-3. **Conservative token economics** — Pre-minting with `_transfer` (not `_mint`) for ecosystem fund ensures `totalSupply` is bounded at deployment
+3. **Conservative token economics** — Initial allocations are minted upfront and mining remains capped by `MINING_ALLOCATION`, ensuring total supply stays bounded by `MAX_SUPPLY`
 4. **Effective MEV resistance** — Paymaster fallback uses on-chain price quotes with 80% floor; LP addition is structurally unprofitable to sandwich
 5. **One-shot paymaster lock** — `paymasterLocked` eliminates the highest-impact governance attack vector
 
 ### Residual Risks (Accepted)
 
 1. **Oracle trust assumption** — The `mineSigner` can authorize arbitrary scores. Mitigation: key rotation capability + future multisig ownership
-2. **Private bundler dependency** — Public bundler compatibility is sacrificed for real-time pricing. Mitigation: self-hosted infrastructure
+2. **Cached pricing drift in paymaster** — Mode 1 AGC collection is based on cached reserves while final settlement occurs later against fresh reserves. Mitigation: operational monitoring, conservative deposit management, and manual replenishment when needed
 3. **No pause mechanism** — Emergency response relies on indirect circuit breakers (signer rotation, EntryPoint withdrawal)
 
 ### Final Assessment
 
-**The contracts are production-ready.** No issues affecting fund safety or protocol integrity remain. The 5 Low and 6 Informational findings are best-practice recommendations that can be addressed at the team's discretion without blocking deployment.
+**The contracts are production-ready.** No issues affecting fund safety or protocol integrity remain. The remaining 4 Low and 5 Informational items are best-practice recommendations and accepted operational trade-offs that do not block deployment.
 
 ---
 
