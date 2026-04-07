@@ -1706,6 +1706,215 @@ async function cmd_margin_positions(poolStr) {
   }
 }
 
+// ======================= MARGIN CLOSE =======================
+
+function parseMarginCloseArgs(tokenIdStr, percentStr) {
+  if (!tokenIdStr || !percentStr) return null;
+  const tokenId = BigInt(tokenIdStr);
+  const percent = parseInt(percentStr);
+  if (isNaN(percent) || percent < 1 || percent > 100) {
+    console.log(`> ERROR: Percent must be 1-100 (got "${percentStr}").`);
+    return null;
+  }
+  return { tokenId, percent };
+}
+
+async function computeClosePreview(publicClient, netConfig, pool, poolId, tokenId, percent) {
+  const marginPositionABI = loadABI("LikwidMarginPosition");
+  const helperABI = loadABI("LikwidHelper");
+  const helperAddr = netConfig.contracts.LikwidHelper;
+  const marginAddr = netConfig.contracts.LikwidMarginPosition;
+
+  // 1. Read position state
+  const posState = await publicClient.readContract({
+    address: marginAddr, abi: marginPositionABI,
+    functionName: "getPositionState", args: [tokenId],
+  });
+  if (posState.debtAmount === 0n) throw new Error("Position has no debt (already closed).");
+
+  const marginForOne = posState.marginForOne;
+  const { marginAmount, marginTotal, debtAmount } = posState;
+  const marginToken = marginForOne ? pool.currency1 : pool.currency0;
+  const borrowToken = marginForOne ? pool.currency0 : pool.currency1;
+
+  // 2. Pool state for current price
+  const stateInfo = await publicClient.readContract({
+    address: helperAddr, abi: helperABI,
+    functionName: "getPoolStateInfo", args: [poolId],
+  });
+  const r0 = Number(formatUnits(stateInfo.pairReserve0, pool.currency0.decimals));
+  const r1 = Number(formatUnits(stateInfo.pairReserve1, pool.currency1.decimals));
+  const curPrice = r0 / r1;
+
+  // 3. Close calculations
+  const positionValue = marginAmount + marginTotal;
+  const releaseAmount = positionValue * BigInt(percent) / 100n;
+  const repayAmount = (debtAmount * BigInt(percent) + 99n) / 100n;
+
+  // Cost to repay debt: getAmountIn(!marginForOne, repayAmount, dynamicFee=false)
+  const costResult = await publicClient.readContract({
+    address: helperAddr, abi: helperABI,
+    functionName: "getAmountIn", args: [poolId, !marginForOne, repayAmount, false],
+  });
+  const costAmount = costResult[0];
+
+  const closeAmount = releaseAmount > costAmount ? releaseAmount - costAmount : 0n;
+  const marginScaled = marginAmount * BigInt(percent) / 100n;
+  const pnlNegative = closeAmount < marginScaled;
+  const pnlValue = pnlNegative ? marginScaled - closeAmount : closeAmount - marginScaled;
+
+  // 4. Liquidation price & margin level
+  const marginAmtF = Number(formatUnits(marginAmount, marginToken.decimals));
+  const marginTotalF = Number(formatUnits(marginTotal, marginToken.decimals));
+  const debtAmountF = Number(formatUnits(debtAmount, borrowToken.decimals));
+  const liquidationLevel = 1.1;
+
+  let liqPrice;
+  if (!marginForOne) {
+    liqPrice = (marginAmtF + marginTotalF) / (debtAmountF * liquidationLevel);
+  } else {
+    liqPrice = (debtAmountF * liquidationLevel) / (marginAmtF + marginTotalF);
+  }
+
+  let debtValueInMargin;
+  if (!marginForOne) {
+    debtValueInMargin = debtAmountF * curPrice;
+  } else {
+    debtValueInMargin = debtAmountF / curPrice;
+  }
+  const marginLevel = (marginAmtF + marginTotalF) / debtValueInMargin;
+
+  return {
+    marginForOne, marginToken, borrowToken,
+    marginAmount, marginTotal, debtAmount,
+    releaseAmount, repayAmount, costAmount, closeAmount,
+    pnlNegative, pnlValue, liqPrice, curPrice, marginLevel,
+  };
+}
+
+function printClosePreview(pool, tokenId, percent, slippage, preview) {
+  const { marginForOne, marginToken, borrowToken,
+    marginAmount, marginTotal, debtAmount,
+    repayAmount, closeAmount, pnlNegative, pnlValue,
+    liqPrice, curPrice, marginLevel } = preview;
+
+  const dirLabel = marginForOne
+    ? `Long ${pool.currency1.symbol} (Short ${pool.currency0.symbol})`
+    : `Short ${pool.currency1.symbol} (Long ${pool.currency0.symbol})`;
+  const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
+  const swapFeeStr = (pool.fee / 10000).toFixed(1);
+  const marginFeeStr = (pool.marginFee / 10000).toFixed(1);
+  const closeAmountMin = closeAmount * BigInt(100 - slippage) / 100n;
+
+  console.log(`>`);
+  console.log(`> MARGIN CLOSE PREVIEW`);
+  console.log(`> Pool: ${poolName} Swap Fee: ${swapFeeStr}% Margin Fee: ${marginFeeStr}%`);
+  console.log(`> ${dirLabel}`);
+  console.log(`> Position #${tokenId}`);
+  console.log(`>`);
+  console.log(`> Margin Amount:   ${formatUnits(marginAmount, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Margin Total:    ${formatUnits(marginTotal, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Debt:            ${formatUnits(debtAmount, borrowToken.decimals)} ${borrowToken.symbol}`);
+  console.log(`> Liq.Price:       ${liqPrice.toFixed(8)} ${pool.currency0.symbol} per ${pool.currency1.symbol}`);
+  console.log(`> Cur.Price:       ${curPrice.toFixed(8)} ${pool.currency0.symbol} per ${pool.currency1.symbol}`);
+  console.log(`> Margin Level:    ${marginLevel.toFixed(2)}`);
+  console.log(`>`);
+  console.log(`> --- Close Scale ${percent}% ---`);
+  console.log(`> Close Debt:      ${formatUnits(repayAmount, borrowToken.decimals)} ${borrowToken.symbol}`);
+  console.log(`> Estimated PNL:   ${pnlNegative ? "-" : "+"}${formatUnits(pnlValue, marginToken.decimals)} ${marginToken.symbol}`);
+  console.log(`> Max Slippage:    ${slippage}%`);
+  console.log(`> Min. Received:   ${formatUnits(closeAmountMin, marginToken.decimals)} ${marginToken.symbol}`);
+}
+
+async function cmd_margin_close_quote(poolStr, tokenIdStr, percentStr, slippageStr = "1") {
+  if (!poolStr || !tokenIdStr || !percentStr) {
+    console.log(`> Usage: margin_close_quote <pool> <tokenId> <percent> [slippage%]`);
+    console.log(`> Pool: token pair (e.g. ETH/LIKWID)`);
+    console.log(`> tokenId: margin position NFT ID`);
+    console.log(`> Percent: 1-100 (% of position to close)`);
+    console.log(`> Default slippage: 1%`);
+    return;
+  }
+
+  const parsed = parseMarginCloseArgs(tokenIdStr, percentStr);
+  if (!parsed) return;
+  const { tokenId, percent } = parsed;
+  const slippage = parseInt(slippageStr) || 1;
+
+  const config = loadConfig();
+  if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
+  const netConfig = loadNetworkConfig(config.network);
+  if (!netConfig) return;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const clients = createClients(config, netConfig);
+  if (!clients) return;
+
+  try {
+    const preview = await computeClosePreview(clients.publicClient, netConfig, pool, poolId, tokenId, percent);
+    printClosePreview(pool, tokenId, percent, slippage, preview);
+  } catch (e) {
+    console.log(`> ERROR: ${e.shortMessage || e.message}`);
+  }
+}
+
+async function cmd_margin_close(poolStr, tokenIdStr, percentStr, slippageStr = "1") {
+  if (!poolStr || !tokenIdStr || !percentStr) {
+    console.log(`> Usage: margin_close <pool> <tokenId> <percent> [slippage%]`);
+    console.log(`> Pool: token pair (e.g. ETH/LIKWID)`);
+    console.log(`> tokenId: margin position NFT ID`);
+    console.log(`> Percent: 1-100 (% of position to close)`);
+    console.log(`> Default slippage: 1%`);
+    return;
+  }
+
+  const parsed = parseMarginCloseArgs(tokenIdStr, percentStr);
+  if (!parsed) return;
+  const { tokenId, percent } = parsed;
+  const closeMillionth = percent * 10000;
+  const slippage = parseInt(slippageStr) || 1;
+
+  const ctx = await resolveContext();
+  if (!ctx) return;
+  const { config, netConfig, eoaAccount, publicClient, senderAddress } = ctx;
+
+  const pool = resolvePool(netConfig, poolStr);
+  if (!pool) return console.log(`> ERROR: Pool "${poolStr}" not found. Run "pools" to list.`);
+
+  const poolId = computePoolId(pool);
+  const marginPositionABI = loadABI("LikwidMarginPosition");
+  const marginAddr = netConfig.contracts.LikwidMarginPosition;
+
+  // Preview
+  let preview;
+  try {
+    preview = await computeClosePreview(publicClient, netConfig, pool, poolId, tokenId, percent);
+    printClosePreview(pool, tokenId, percent, slippage, preview);
+  } catch (e) {
+    return console.log(`> ERROR: ${e.shortMessage || e.message}`);
+  }
+
+  const closeAmountMin = preview.closeAmount * BigInt(100 - slippage) / 100n;
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+
+  const calls = [{
+    to: marginAddr,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: marginPositionABI,
+      functionName: "close",
+      args: [tokenId, closeMillionth, closeAmountMin, deadline],
+    }),
+  }];
+
+  console.log(`>`);
+  console.log(`> Executing margin close...`);
+  await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
+}
+
 // ======================= CLI ROUTER =======================
 
 if (require.main === module) {
@@ -1738,6 +1947,8 @@ Margin Trading:
   margin_quote <pool> <dir> <lev> <amt>     Preview margin position without executing.
   margin_open  <pool> <dir> <lev> <amt>     Open or increase a margin position.
   margin_positions <pool>                   Show your margin positions.
+  margin_close_quote <pool> <id> <pct> [s%]  Preview margin close without executing.
+  margin_close <pool> <id> <pct> [slip%]    Close (partially) a margin position. pct: 1-100
 
 Arguments:
   <pool>      Token pair (e.g. ETH/USDT). Lowest fee tier selected by default.
@@ -1790,6 +2001,12 @@ Arguments:
           break;
         case "margin_positions":
           await cmd_margin_positions(args[1]);
+          break;
+        case "margin_close_quote":
+          await cmd_margin_close_quote(args[1], args[2], args[3], args[4]);
+          break;
+        case "margin_close":
+          await cmd_margin_close(args[1], args[2], args[3], args[4]);
           break;
         default:
           console.log(`> Unknown command: ${command}`);

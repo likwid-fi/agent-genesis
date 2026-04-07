@@ -471,6 +471,119 @@ Data source: API provides `tokenId` only; all other data (marginAmount, marginTo
 - If debt currency ≠ price currency: `PNL = marginTotal - (debt × curPrice)`
 - If debt currency = price currency: `PNL = marginTotal - (debt × 1/curPrice)`
 
+### Step 4: Close Position
+
+Close all or part of a margin position. Supports partial closing (e.g., 50%).
+
+#### 4a. Ask the User
+
+Before running anything, collect from the user:
+
+1. **Pool** — Which pool? (e.g., ETH/LIKWID)
+2. **Direction** — Which side to close? `long` (Long currency1) or `short` (Short currency1)
+3. **Close Percentage** — How much to close? 1-100%
+
+#### 4b. Query Positions
+
+Run `margin_positions` to find the user's open positions in that pool and direction:
+
+```bash
+node likwid-fi.js margin_positions <pool>
+```
+
+Filter the results by the requested direction (`long` or `short`).
+
+- **No positions found →** Tell the user: "You have no open `<DIRECTION>` positions on `<POOL>`."
+- **One position →** Proceed automatically with that tokenId.
+- **Multiple positions →** Show all matching positions to the user and ask which tokenId to close:
+
+> **Found 3 Long LIKWID positions on ETH/LIKWID:**
+>
+> `#20` — Margin: 3 LIKWID, Total: 5.982 LIKWID, Debt: 0.00060581 ETH
+> `#25` — Margin: 1 LIKWID, Total: 1.994 LIKWID, Debt: 0.00020193 ETH
+> `#31` — Margin: 5 LIKWID, Total: 9.970 LIKWID, Debt: 0.00101000 ETH
+>
+> Which position to close? (enter tokenId)
+
+**Wait for user selection before proceeding.**
+
+#### 4c. Preview (margin_close_quote)
+
+Use `margin_close_quote` to preview without executing:
+
+```bash
+node likwid-fi.js margin_close_quote <pool> <tokenId> <percent> [slippage%]
+```
+
+**Example:**
+```bash
+node likwid-fi.js margin_close_quote ETH/LIKWID 20 50
+```
+
+**Close Calculation:**
+- `releaseAmount = (marginAmount + marginTotal) × closeScale`
+- `costAmount = LikwidHelper.getAmountIn(!marginForOne, debt × closeScale, dynamicFee=false)`
+- `closeAmount = releaseAmount - costAmount`
+- `PNL = closeAmount - marginAmount × closeScale`
+- `closeAmountMin = closeAmount × (1 - slippage)`
+
+**Report to human:**
+
+> **Margin Close Preview**
+> Pool: ETH/LIKWID Swap Fee: 0.3% Margin Fee: 0.3%
+> Long LIKWID (Short ETH)
+> Position #20
+>
+> Margin Amount: `3 LIKWID`
+> Margin Total: `5.982 LIKWID`
+> Debt: `0.00060581 ETH`
+> Liq.Price: `0.00018217 ETH`
+> Cur.Price: `0.00018317 ETH`
+> Margin Level: `1.99`
+>
+> --- Close Scale 50% ---
+> Close Debt: `0.00030290 ETH`
+> Estimated PNL: `-0.02699081 LIKWID`
+> Max Slippage: `1%`
+> Min. Received: `1.46564415 LIKWID`
+>
+> Proceed? (yes/no)
+
+**Wait for human confirmation before executing.**
+
+#### 4d. Execute (margin_close)
+
+On confirmation, execute with the same parameters:
+
+```bash
+node likwid-fi.js margin_close <pool> <tokenId> <percent> [slippage%]
+```
+
+**Example:**
+```bash
+node likwid-fi.js margin_close ETH/LIKWID 20 50
+```
+
+On-chain contract call: `close(tokenId, closeMillionth, closeAmountMin, deadline)`
+- `closeMillionth = percent × 10000` (e.g., 50% → 500000, 100% → 1000000)
+
+**Report to human:**
+
+> **Margin Close Successful!**
+> Position #`<TOKEN_ID>` closed `<PERCENT>`%
+> Transaction: `<TX_HASH>`
+> Block: `<BLOCK_NUMBER>`
+
+Or on failure:
+
+> **Margin Close Failed:** `<ERROR_MESSAGE>`
+> Position was NOT modified.
+
+**Key notes:**
+- Partial close (e.g., 50%) keeps the remaining position open with reduced margin and debt.
+- 100% close fully repays debt and returns remaining margin to the user.
+- `InsufficientCloseReceived` error means the position may be near liquidation — the swap output cannot cover the debt.
+
 ---
 
 ## 5. Error Handling
@@ -509,6 +622,8 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `margin_quote <pool> <dir> <lev> <amt>` | Preview margin position. |
 | `margin_open <pool> <dir> <lev> <amt>` | Open or increase margin position. |
 | `margin_positions <pool>` | Show your margin positions. |
+| `margin_close_quote <pool> <id> <pct> [slip]` | Preview margin close. |
+| `margin_close <pool> <id> <pct> [slip]` | Execute margin close. |
 
 ### Arguments
 
@@ -525,6 +640,7 @@ When errors occur, **always inform the human clearly**. Never silently swallow e
 | `<fee>`, `<mfee>` | `3000` | Fee in basis points (3000 = 0.30%). |
 | `<dir>` (margin) | `long`, `short` | Direction relative to currency1. |
 | `<lev>` | `1`-`5` | Leverage multiplier. |
+| `<pct>` | `1`-`100` | Close percentage (e.g., 50 = close half). |
 
 ---
 
