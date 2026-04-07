@@ -787,10 +787,10 @@ To add a new network, create a JSON file in `pools/<network>.json`:
 ```json
 {
   "network": "<name>",
-  "chainId": <id>,
+  "chainId": "<id>",
   "rpc": "<rpc_url>",
   "bundlerUrl": "<bundler_url>",
-  "smartAccountFactory": "<factory_address>",
+  "paymaster": "<paymaster_address>",
   "contracts": {
     "LikwidVault": "<address>",
     "LikwidPairPosition": "<address>",
@@ -798,15 +798,20 @@ To add a new network, create a JSON file in `pools/<network>.json`:
     "LikwidLendPosition": "<address>",
     "LikwidHelper": "<address>"
   },
-  "pools": [
-    {
-      "name": "TOKEN_A / TOKEN_B",
-      "currency0": { "address": "<addr>", "symbol": "A", "decimals": 18 },
-      "currency1": { "address": "<addr>", "symbol": "B", "decimals": 18 },
-      "fee": 3000,
-      "marginFee": 3000
-    }
-  ]
+  "tokens": {
+    "ETH": { "address": "0x0000000000000000000000000000000000000000", "decimals": 18 },
+    "USDT": { "address": "<addr>", "decimals": 6 }
+  },
+  "pools": {
+    "ETH/USDT": [
+      {
+        "currency0": { "address": "<addr>", "symbol": "ETH", "decimals": 18 },
+        "currency1": { "address": "<addr>", "symbol": "USDT", "decimals": 6 },
+        "fee": 3000,
+        "marginFee": 3000
+      }
+    ]
+  }
 }
 ```
 
