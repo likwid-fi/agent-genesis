@@ -134,6 +134,7 @@ async function loadNetworkConfig(network) {
 
   if (remote) {
     // Update local cache with remote data
+    fs.mkdirSync(POOLS_DIR, { recursive: true });
     const cacheFile = path.join(POOLS_DIR, `${network}.json`);
     fs.writeFileSync(cacheFile, JSON.stringify(remote, null, 2) + "\n");
   } else if (cached) {
@@ -143,7 +144,9 @@ async function loadNetworkConfig(network) {
   const base = remote || cached;
   if (!base) {
     console.log(`> ERROR: Network config not found and remote is unreachable.`);
-    console.log(`> Available cached networks: ${fs.readdirSync(POOLS_DIR).filter(f => f.endsWith(".json") && !f.endsWith(".local.json")).map(f => f.replace(".json", "")).join(", ")}`);
+    if (fs.existsSync(POOLS_DIR)) {
+      console.log(`> Available cached networks: ${fs.readdirSync(POOLS_DIR).filter(f => f.endsWith(".json") && !f.endsWith(".local.json")).map(f => f.replace(".json", "")).join(", ")}`);
+    }
     return null;
   }
 
@@ -1174,6 +1177,7 @@ function saveUserOverrides(network, newTokens, newPool, pairKey) {
     overrides.pools[pairKey].sort((a, b) => a.fee - b.fee);
   }
 
+  fs.mkdirSync(POOLS_DIR, { recursive: true });
   const file = path.join(POOLS_DIR, `${network}.local.json`);
   fs.writeFileSync(file, JSON.stringify(overrides, null, 2) + "\n");
 }
