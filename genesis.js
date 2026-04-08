@@ -99,7 +99,7 @@ const bundlerTransport = http(BUNDLER_URL);
 
 async function getBundlerGasPrice() {
   const fees = await publicClient.estimateFeesPerGas();
-  const floor = 1_000_000_000n; // 1 gwei floor
+  const floor = 10_000_000n; // 0.01 gwei floor
   return {
     maxFeePerGas: fees.maxFeePerGas > floor ? fees.maxFeePerGas : floor,
     maxPriorityFeePerGas: fees.maxPriorityFeePerGas > floor ? fees.maxPriorityFeePerGas : floor,
@@ -182,19 +182,6 @@ function parseCliErrorFields(message) {
 
 function sanitizeCliField(value) {
   return String(value).replace(/\|/g, "/").replace(/\s+/g, " ").trim();
-}
-
-function getNormalizedErrorMessage(error) {
-  return [
-    error?.message,
-    error?.cause?.message,
-    typeof error?.extraData === "string" ? error.extraData : null,
-    error?.details,
-    typeof error?.shortMessage === "string" ? error.shortMessage : null,
-  ]
-    .filter(Boolean)
-    .join(" | ")
-    .toLowerCase();
 }
 
 function isFreeMineCall(call) {
@@ -300,7 +287,7 @@ function loadEnvConfig() {
 
 // ======================= USER OPERATION =======================
 
-async function runUserOp(signer, smartAccount, bundlerClient, calls, description) {
+async function runUserOp(signer, bundlerClient, calls, description) {
   let gasPaymentMode = "agc";
   const expectsFreeMine = isFreeMineOperation(calls);
   let canUseFreeMine = false;
@@ -335,17 +322,11 @@ async function runUserOp(signer, smartAccount, bundlerClient, calls, description
       }),
     ]);
 
-    // Check EIP-7702 authorization
-    const authorization = await getEip7702Authorization(signer);
-    const userOpOptions = authorization ? { authorization } : {};
-
     // Determine gas payment mode: free mine > ETH direct > AGC paymaster
-    let usePaymaster = true;
     if (canUseFreeMine) {
       gasPaymentMode = "free";
-    } else if (ethBalance > operationRequiredEth + parseEther("0.001")) {
+    } else if (ethBalance > operationRequiredEth + parseEther("0.00005")) {
       gasPaymentMode = "eth";
-      usePaymaster = false;
     } else {
       // Check AGC balance for paymaster precharge
       const estimatedAgcPrecharge = await estimateAgcPrechargeFromRequiredEth(parseEther("0.005"));
@@ -367,27 +348,57 @@ async function runUserOp(signer, smartAccount, bundlerClient, calls, description
     console.log(`> Smart account ETH balance: ${Number(ethBalance) / 1e18} ETH`);
     console.log(`> Smart account AGC balance: ${Number(agcBalance) / 1e18} AGC`);
 
+    console.log(
+      `> Using ${gasPaymentMode === "free" ? "free mine (paymaster)" : gasPaymentMode === "eth" ? "direct ETH (no EIP-7702)" : "AGC / paymaster"} gas payment...`,
+    );
+
+    // --- ETH direct path: send raw transactions, no UserOp / EIP-7702 ---
+    if (gasPaymentMode === "eth") {
+      const walletClient = createWalletClient({ account: signer, chain: CHAIN, transport: http(RPC_URL) });
+      for (const call of callList) {
+        const txHash = await walletClient.sendTransaction({
+          to: call.to,
+          value: call.value || 0n,
+          data: call.data,
+        });
+        console.log(`> Transaction submitted: ${txHash}`);
+        console.log("> Waiting for confirmation...");
+        const txReceipt = await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 });
+        if (txReceipt.status !== "success") {
+          throw new Error(
+            [
+              "CLI_USEROP_REVERTED",
+              `reason=transaction reverted`,
+              `tx_hash=${txHash}`,
+              `gas_used=${txReceipt.gasUsed ? txReceipt.gasUsed.toString() : "unknown"}`,
+              `gas_cost_eth=unknown`,
+            ].join("|"),
+          );
+        }
+      }
+      const lastTxHash = callList.length > 0 ? "see above" : "none";
+      console.log(`\n> ✅ ${description} Successful! (gas paid in ETH)`);
+      return { success: true };
+    }
+
+    // --- UserOp path: free mine (paymaster) or AGC paymaster ---
+    const authorization = await getEip7702Authorization(signer);
+    const userOpOptions = authorization ? { authorization } : {};
     const sendArgs = {
       calls: callList,
       ...userOpOptions,
     };
 
-    if (usePaymaster) {
-      const paymasterStub = {
-        paymaster: AGENT_PAYMASTER_ADDRESS,
-        paymasterData: "0x",
-        paymasterVerificationGasLimit: 600000n,
-        paymasterPostOpGasLimit: 600000n,
-      };
-      sendArgs.paymaster = {
-        getPaymasterStubData: async () => paymasterStub,
-        getPaymasterData: async () => paymasterStub,
-      };
-    }
-
-    console.log(
-      `> Using ${gasPaymentMode === "free" ? "free mine (paymaster)" : gasPaymentMode === "eth" ? "direct ETH" : "AGC / paymaster"} gas payment...`,
-    );
+    const paymasterStub = {
+      paymaster: AGENT_PAYMASTER_ADDRESS,
+      paymasterData: "0x",
+      paymasterVerificationGasLimit: 600000n,
+      paymasterPostOpGasLimit: 600000n,
+    };
+    sendArgs.paymaster = {
+      getPaymasterStubData: async () => paymasterStub,
+      getPaymasterData: async () => paymasterStub,
+    };
 
     const userOpHash = await bundlerClient.sendUserOperation(sendArgs);
     console.log(`> UserOperation submitted! Hash: ${userOpHash}`);
@@ -408,9 +419,7 @@ async function runUserOp(signer, smartAccount, bundlerClient, calls, description
     const gasNote =
       gasPaymentMode === "free"
         ? " (first mine sponsored by paymaster)"
-        : gasPaymentMode === "eth"
-          ? " (gas paid in ETH)"
-          : " (gas paid in AGC)";
+        : " (gas paid in AGC)";
     console.log(`\n> ✅ ${description} Successful!${gasNote} Tx Hash: ${receipt.receipt.transactionHash}`);
     return receipt;
   } catch (e) {
@@ -797,7 +806,7 @@ async function claimVested() {
       functionName: "claimVested",
     }),
   };
-  await runUserOp(signer, smartAccount, bundlerClient, call, "Claim Vested AGC");
+  await runUserOp(signer, bundlerClient, call, "Claim Vested AGC");
 }
 
 async function claimable() {
@@ -842,7 +851,7 @@ async function mine(scoreStr, signature, nonceStr, ethAmountStr) {
     }),
   };
 
-  await runUserOp(signer, smartAccount, bundlerClient, mineCall, "Mine AGC");
+  await runUserOp(signer, bundlerClient, mineCall, "Mine AGC");
 }
 
 // ======================= CLI ROUTER =======================

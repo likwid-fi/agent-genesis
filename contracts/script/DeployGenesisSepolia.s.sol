@@ -5,6 +5,7 @@ import {Script, console} from "forge-std/Script.sol";
 import {AgentGenesisCoin} from "../src/AgentGenesisCoin.sol";
 import {AgentPaymaster, IEntryPoint} from "../src/AgentPaymaster.sol";
 import {IPairPositionManager} from "@likwid-fi/core/interfaces/IPairPositionManager.sol";
+import {IBasePositionManager} from "@likwid-fi/core/interfaces/IBasePositionManager.sol";
 import {IVault} from "@likwid-fi/core/interfaces/IVault.sol";
 import {PoolKey} from "@likwid-fi/core/types/PoolKey.sol";
 import {Currency, CurrencyLibrary} from "@likwid-fi/core/types/Currency.sol";
@@ -35,7 +36,7 @@ contract DeployGenesisScript is Script {
 
         // Initialize Pool (ETH/AGC)
         IPairPositionManager pm = IPairPositionManager(likwidPairPosition);
-        IVault vault = pm.vault();
+        IVault vault = IBasePositionManager(address(pm)).vault();
         PoolKey memory poolKey = PoolKey({
             currency0: CurrencyLibrary.ADDRESS_ZERO,
             currency1: Currency.wrap(address(agc)),

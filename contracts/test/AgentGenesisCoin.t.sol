@@ -273,6 +273,77 @@ contract AgentGenesisCoinTest is Test {
         assertEq(endTime, block.timestamp + coin.VESTING_DURATION());
     }
 
+    function test_Mine_SecondFullAlignment() public {
+        address user = address(0x1);
+
+        // --- First mine (Full Alignment) ---
+        uint256 nonce1 = block.timestamp;
+        bytes memory sig1 = _signMine(user, nonce1, TEST_SCORE);
+
+        uint256 reward1 = coin.getEstimatedReward(TEST_SCORE);
+        uint256 liquidPart1 = (reward1 * 20) / 100;
+        uint256 ethRequired1 = liquidPart1 / 10;
+
+        vm.deal(user, ethRequired1 * 2);
+        vm.prank(user);
+        coin.mine{value: ethRequired1 * 2}(TEST_SCORE, sig1, nonce1);
+
+        (,,,, uint256 lpTokenId1) = coin.vestingSchedules(user);
+        assertGt(lpTokenId1, 0, "First mine should create LP token");
+
+        // --- Wait for cooldown ---
+        vm.warp(block.timestamp + coin.EPOCH_LENGTH());
+
+        // --- Second mine (Full Alignment) ---
+        uint256 nonce2 = block.timestamp;
+        bytes memory sig2 = _signMine(user, nonce2, TEST_SCORE);
+
+        uint256 reward2 = coin.getEstimatedReward(TEST_SCORE);
+        uint256 liquidPart2 = (reward2 * 20) / 100;
+        uint256 ethRequired2 = liquidPart2 / 10;
+
+        vm.deal(user, ethRequired2 * 2);
+        vm.prank(user);
+        coin.mine{value: ethRequired2 * 2}(TEST_SCORE, sig2, nonce2);
+
+        (uint256 totalLocked2,,,, uint256 lpTokenId2) = coin.vestingSchedules(user);
+        assertGt(totalLocked2, 0, "Second mine should have vesting");
+        assertEq(lpTokenId2, lpTokenId1, "Should reuse same LP token");
+    }
+
+    function test_Mine_SecondFullAlignment_SmartAccount() public {
+        // Simulate a smart account (contract) with receive() — mimics EIP-7702 Simple7702Account
+        MockSmartAccount smartUser = new MockSmartAccount();
+        address user = address(smartUser);
+
+        // --- First mine (Full Alignment) ---
+        uint256 nonce1 = block.timestamp;
+        bytes memory sig1 = _signMine(user, nonce1, TEST_SCORE);
+
+        uint256 reward1 = coin.getEstimatedReward(TEST_SCORE);
+        uint256 liquidPart1 = (reward1 * 20) / 100;
+        uint256 ethRequired1 = liquidPart1 / 10;
+
+        vm.deal(user, ethRequired1 * 2);
+        vm.prank(user);
+        coin.mine{value: ethRequired1 * 2}(TEST_SCORE, sig1, nonce1);
+
+        // --- Wait for cooldown ---
+        vm.warp(block.timestamp + coin.EPOCH_LENGTH());
+
+        // --- Second mine (Full Alignment) ---
+        uint256 nonce2 = block.timestamp;
+        bytes memory sig2 = _signMine(user, nonce2, TEST_SCORE);
+
+        uint256 reward2 = coin.getEstimatedReward(TEST_SCORE);
+        uint256 liquidPart2 = (reward2 * 20) / 100;
+        uint256 ethRequired2 = liquidPart2 / 10;
+
+        vm.deal(user, ethRequired2 * 2);
+        vm.prank(user);
+        coin.mine{value: ethRequired2 * 2}(TEST_SCORE, sig2, nonce2);
+    }
+
     function test_ClaimVested_NoVestingSchedule() public {
         address user = address(0x1);
 
@@ -1228,4 +1299,9 @@ contract AgentGenesisCoinTest is Test {
         assertEq(finalReleased, 0, "Final: released should be 0 after full claim");
         assertEq(coin.getClaimableVested(user), 0, "Final: no more claimable vested tokens");
     }
+}
+
+/// @dev Minimal smart account that can receive ETH — simulates EIP-7702 Simple7702Account
+contract MockSmartAccount {
+    receive() external payable {}
 }
