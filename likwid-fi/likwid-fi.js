@@ -37,6 +37,8 @@ const os = require("os");
 const CONFIG_FILE = path.join(__dirname, "config.json");
 const POOLS_DIR = path.join(__dirname, "pools");
 const ABI_DIR = path.join(__dirname, "abi");
+const REMOTE_POOLS_BASE_URL = "https://likwid.fi/agent-pools";
+const REMOTE_FETCH_TIMEOUT_MS = 3000;
 
 // ======================= CHAIN MAP =======================
 
@@ -69,14 +71,84 @@ function saveConfig(cfg) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
 }
 
-function loadNetworkConfig(network) {
+function loadCachedNetworkConfig(network) {
   const file = path.join(POOLS_DIR, `${network}.json`);
-  if (!fs.existsSync(file)) {
-    console.log(`> ERROR: Network config not found: ${file}`);
-    console.log(`> Available networks: ${fs.readdirSync(POOLS_DIR).map(f => f.replace(".json", "")).join(", ")}`);
+  if (!fs.existsSync(file)) return null;
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); }
+  catch { return null; }
+}
+
+async function fetchRemoteConfig(network) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS);
+    const res = await fetch(`${REMOTE_POOLS_BASE_URL}/${network}.json`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
     return null;
   }
-  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function loadUserOverrides(network) {
+  const file = path.join(POOLS_DIR, `${network}.local.json`);
+  if (!fs.existsSync(file)) return { tokens: {}, pools: {} };
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); }
+  catch { return { tokens: {}, pools: {} }; }
+}
+
+function mergeConfigs(baseConfig, userOverrides) {
+  const merged = JSON.parse(JSON.stringify(baseConfig));
+
+  // Merge tokens: add user tokens that don't exist in base
+  if (userOverrides.tokens) {
+    for (const [symbol, token] of Object.entries(userOverrides.tokens)) {
+      if (!merged.tokens[symbol]) {
+        merged.tokens[symbol] = token;
+      }
+    }
+  }
+
+  // Merge pools: add user pools/tiers that don't exist in base
+  if (userOverrides.pools) {
+    for (const [pairKey, tiers] of Object.entries(userOverrides.pools)) {
+      if (!merged.pools[pairKey]) {
+        merged.pools[pairKey] = tiers;
+      } else {
+        for (const tier of tiers) {
+          const exists = merged.pools[pairKey].some(p => p.fee === tier.fee && p.marginFee === tier.marginFee);
+          if (!exists) merged.pools[pairKey].push(tier);
+        }
+      }
+      merged.pools[pairKey].sort((a, b) => a.fee - b.fee);
+    }
+  }
+
+  return merged;
+}
+
+async function loadNetworkConfig(network) {
+  const cached = loadCachedNetworkConfig(network);
+  const remote = await fetchRemoteConfig(network);
+
+  if (remote) {
+    // Update local cache with remote data
+    const cacheFile = path.join(POOLS_DIR, `${network}.json`);
+    fs.writeFileSync(cacheFile, JSON.stringify(remote, null, 2) + "\n");
+  } else if (cached) {
+    console.log(`> Note: Using cached pool config (remote unavailable)`);
+  }
+
+  const base = remote || cached;
+  if (!base) {
+    console.log(`> ERROR: Network config not found and remote is unreachable.`);
+    console.log(`> Available cached networks: ${fs.readdirSync(POOLS_DIR).filter(f => f.endsWith(".json") && !f.endsWith(".local.json")).map(f => f.replace(".json", "")).join(", ")}`);
+    return null;
+  }
+
+  const userOverrides = loadUserOverrides(network);
+  return mergeConfigs(base, userOverrides);
 }
 
 function loadABI(name) {
@@ -205,7 +277,7 @@ async function resolveContext() {
   const config = loadConfig();
   if (!config) { console.log(`> ERROR: Not configured. Run setup first.`); return null; }
 
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return null;
 
   const privateKey = readPrivateKey(config.keyFilePath);
@@ -425,7 +497,7 @@ async function cmd_setup(network, keyFilePath) {
     return;
   }
 
-  const netConfig = loadNetworkConfig(network);
+  const netConfig = await loadNetworkConfig(network);
   if (!netConfig) return;
 
   const privateKey = readPrivateKey(keyFilePath);
@@ -450,7 +522,7 @@ async function cmd_account() {
     return;
   }
 
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const clients = createClients(config, netConfig);
@@ -477,7 +549,7 @@ async function cmd_pools() {
     return;
   }
 
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   console.log(`> POOLS on ${netConfig.network} (Chain ID ${netConfig.chainId})`);
@@ -518,7 +590,7 @@ async function cmd_quote(poolStr, direction, amountStr) {
   const config = loadConfig();
   if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
 
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const pool = resolvePool(netConfig, poolStr);
@@ -723,7 +795,7 @@ async function cmd_pool_info(poolStr) {
   const config = loadConfig();
   if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
 
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const pool = resolvePool(netConfig, poolStr);
@@ -1086,9 +1158,24 @@ async function cmd_lp_remove(poolStr, percentStr = "100") {
 
 // ======================= CREATE PAIR =======================
 
-function saveNetworkConfig(network, netConfig) {
-  const file = path.join(POOLS_DIR, `${network}.json`);
-  fs.writeFileSync(file, JSON.stringify(netConfig, null, 2) + "\n");
+function saveUserOverrides(network, newTokens, newPool, pairKey) {
+  const overrides = loadUserOverrides(network);
+
+  for (const token of newTokens) {
+    if (!overrides.tokens[token.symbol]) {
+      overrides.tokens[token.symbol] = { address: token.address.toLowerCase(), decimals: token.decimals };
+    }
+  }
+
+  if (!overrides.pools[pairKey]) overrides.pools[pairKey] = [];
+  const exists = overrides.pools[pairKey].some(p => p.fee === newPool.fee && p.marginFee === newPool.marginFee);
+  if (!exists) {
+    overrides.pools[pairKey].push(newPool);
+    overrides.pools[pairKey].sort((a, b) => a.fee - b.fee);
+  }
+
+  const file = path.join(POOLS_DIR, `${network}.local.json`);
+  fs.writeFileSync(file, JSON.stringify(overrides, null, 2) + "\n");
 }
 
 function resolvePool(netConfig, poolStr) {
@@ -1219,20 +1306,19 @@ async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
   const ok = await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
   if (!ok) return;
 
-  // --- Auto-add new tokens to config ---
-  let configChanged = false;
+  // --- Auto-add new tokens and pool to user overrides ---
+  const newTokens = [];
   for (const token of [currency0, currency1]) {
     const alreadyKnown = Object.values(netConfig.tokens).some(
       t => t.address.toLowerCase() === token.address.toLowerCase()
     );
     if (!alreadyKnown) {
       netConfig.tokens[token.symbol] = { address: token.address.toLowerCase(), decimals: token.decimals };
+      newTokens.push(token);
       console.log(`> Token added to config: ${token.symbol} (${token.address})`);
-      configChanged = true;
     }
   }
 
-  // --- Auto-append pool to config ---
   const pairKey = `${currency0.symbol}/${currency1.symbol}`;
   const newPool = {
     currency0: { address: currency0.address, symbol: currency0.symbol, decimals: currency0.decimals },
@@ -1247,14 +1333,13 @@ async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
   if (!exists) {
     netConfig.pools[pairKey].push(newPool);
     netConfig.pools[pairKey].sort((a, b) => a.fee - b.fee);
-    configChanged = true;
     console.log(`> Pool added to config: ${pairKey} (fee: ${(fee / 10000).toFixed(2)}%).`);
   } else {
     console.log(`> Pool already in config.`);
   }
 
-  if (configChanged) {
-    saveNetworkConfig(config.network, netConfig);
+  if (newTokens.length > 0 || !exists) {
+    saveUserOverrides(config.network, newTokens, newPool, pairKey);
   }
 
   console.log(`> Use "lp_add ${pairKey}" to add initial liquidity to this pool.`);
@@ -1403,7 +1488,7 @@ async function cmd_margin_quote(poolStr, directionStr, leverageStr, amountStr) {
 
   const config = loadConfig();
   if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const pool = resolvePool(netConfig, poolStr);
@@ -1578,7 +1663,7 @@ async function cmd_margin_positions(poolStr) {
 
   const config = loadConfig();
   if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const pool = resolvePool(netConfig, poolStr);
@@ -1843,7 +1928,7 @@ async function cmd_margin_close_quote(poolStr, tokenIdStr, percentStr, slippageS
 
   const config = loadConfig();
   if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const pool = resolvePool(netConfig, poolStr);
@@ -2010,7 +2095,7 @@ async function cmd_margin_repay_quote(poolStr, tokenIdStr, amountStr) {
 
   const config = loadConfig();
   if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const pool = resolvePool(netConfig, poolStr);
@@ -2206,7 +2291,7 @@ async function cmd_margin_modify_quote(poolStr, tokenIdStr, changeAmountStr) {
 
   const config = loadConfig();
   if (!config) return console.log(`> ERROR: Not configured. Run setup first.`);
-  const netConfig = loadNetworkConfig(config.network);
+  const netConfig = await loadNetworkConfig(config.network);
   if (!netConfig) return;
 
   const pool = resolvePool(netConfig, poolStr);
@@ -2438,4 +2523,4 @@ Arguments:
   })();
 }
 
-module.exports = { computePoolId, loadConfig, loadNetworkConfig };
+module.exports = { computePoolId, loadConfig, loadNetworkConfig, loadCachedNetworkConfig };
