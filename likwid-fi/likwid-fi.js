@@ -318,7 +318,7 @@ async function getSmartAccount(config, networkConfig, eoaAccount) {
     userOperation: {
       estimateFeesPerGas: async () => {
         const fees = await publicClient.estimateFeesPerGas();
-        const floor = 1_000_000_000n;
+        const floor = 10_000_000n; // 0.01 gwei floor
         return {
           maxFeePerGas: fees.maxFeePerGas > floor ? fees.maxFeePerGas : floor,
           maxPriorityFeePerGas: fees.maxPriorityFeePerGas > floor ? fees.maxPriorityFeePerGas : floor,
