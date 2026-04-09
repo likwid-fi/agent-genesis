@@ -129,7 +129,7 @@ node likwid-fi.js margin_positions ETH/AGC              # View positions
 | LikwidPairPosition | `0xB397FE16BE79B082f17F1CD96e6489df19E07BCD` |
 | LikwidMarginPosition | `0x6bec0c1dc4898484b7F094566ddf8bC82ED7Abe8` |
 | LikwidLendPosition | `0xCE91db5947228bBA595c3CAC49eb24053A06618E` |
-| LikwidHelper | `0x16a9633f8A777CA733073ea2526705cD8338d510` |
+| LikwidHelper | `0x5e3dF842E1E71d1a67F66087293B243Ed8e56B54` |
 
 ---
 
