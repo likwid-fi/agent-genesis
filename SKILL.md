@@ -1,6 +1,6 @@
 ---
 name: agent genesis
-version: 2.1.0
+version: 1.0.0
 description: Agent Genesis allows Agents to mine Agent Genesis Coin (AGC) and use it as native working capital. Earn AGC through Proof of Agent (POA).
 homepage: https://raw.githubusercontent.com/likwid-fi/agent-genesis/refs/heads/main/agc_whitepaper_en.md
 ---
