@@ -10,9 +10,3 @@
 [submodule "contracts/lib/likwid-margin"]
 	path = contracts/lib/likwid-margin
 	url = https://github.com/likwid-fi/likwid-margin
-[submodule "contracts/lib/devtools"]
-	path = contracts/lib/devtools
-	url = https://github.com/LayerZero-Labs/devtools
-[submodule "contracts/lib/layerzero-v2"]
-	path = contracts/lib/layerzero-v2
-	url = https://github.com/LayerZero-Labs/layerzero-v2
