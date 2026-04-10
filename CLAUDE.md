@@ -107,6 +107,71 @@ Both CLIs follow a **single-file architecture** — all logic in one file, no bu
 - Prototype/test scripts go in `tmp/` directories, never alongside production files
 - Test against real on-chain environments (Base mainnet or Sepolia testnet), never mock
 
+## Releases
+
+Release artifacts are published as GitHub Releases at
+https://github.com/likwid-fi/agent-genesis/releases. Each release ships a
+minimized zip built from `git archive` (only git-tracked source files, no
+`node_modules`, no submodule contents). End users still run
+`npm install` after extraction (see `bootstrap.sh`).
+
+### Release history
+
+| Version | Tag       | Commit    | Date       | Asset size (zipped) |
+|---------|-----------|-----------|------------|---------------------|
+| 1.0.0   | `v1.0.0`  | `f3521df` | 2026-04-10 | 111 KB              |
+
+### How to publish a new release
+
+Prerequisites (one-time):
+- `gh` CLI installed (`sudo apt install gh` via the official apt source)
+- `gh auth login` completed with `repo` scope on the `likwid-fi` org
+
+Then publish a new version with the recipe below. Replace `VERSION` with the
+new semver (e.g. `1.1.0`) and make sure `package.json` `version` matches before
+tagging.
+
+```bash
+VERSION=1.0.0   # change me
+TAG="v${VERSION}"
+
+# 0. Sanity checks
+cd /path/to/agent-genesis
+git status                                    # must be clean
+grep '"version"' package.json                 # must match $VERSION
+git log -1 --oneline                          # confirm release commit
+
+# 1. Tag and push
+git tag -a "$TAG" -m "Release $TAG"
+git push origin "$TAG"
+
+# 2. Build the minimized zip (only git-tracked files)
+git archive \
+  --format=zip \
+  --prefix="agent-genesis-${VERSION}/" \
+  -o "/tmp/agent-genesis-${TAG}.zip" \
+  "$TAG"
+ls -lh "/tmp/agent-genesis-${TAG}.zip"        # expect ~100-200 KB
+
+# 3. Create the GitHub release with the zip attached
+gh release create "$TAG" \
+  --title "Agent Genesis ${TAG}" \
+  --notes "Release notes for ${TAG} — fill in changelog here." \
+  "/tmp/agent-genesis-${TAG}.zip"
+
+# 4. Verify
+gh release view "$TAG" -R likwid-fi/agent-genesis
+```
+
+Notes:
+- GitHub auto-generates `Source code (zip/tar.gz)` for every tagged release;
+  these cannot be disabled. The manually uploaded `agent-genesis-${TAG}.zip`
+  asset only adds a stable, version-named filename — its content is identical.
+- `git archive` automatically excludes `.git/`, `node_modules/`, and submodule
+  contents (the `contracts/lib/*` gitlinks become empty directories), so no
+  extra `--exclude` flags are needed.
+- After publishing, append a row to the **Release history** table above.
+
 ## Current Branch
 
 - `main` — active development branch
