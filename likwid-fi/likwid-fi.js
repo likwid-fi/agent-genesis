@@ -819,13 +819,26 @@ async function cmd_pool_info(poolStr) {
 
     const r0 = stateInfo.pairReserve0;
     const r1 = stateInfo.pairReserve1;
+    // Pool lifecycle: uninitialized (lastUpdated==0) → initialized-empty (lastUpdated>0, reserves==0) → active
+    // Initialization check uses LikwidHelper.getPoolStateInfo().lastUpdated, NOT reserve values.
+    // See docs/likwid-fi-integration-notes.md
+    const lastUpdated = stateInfo.lastUpdated;
 
     const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
 
-    if (r0 === 0n && r1 === 0n) {
+    if (lastUpdated === 0n) {
       console.log(`> POOL_NOT_INITIALIZED`);
       console.log(`> Pool: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
-      console.log(`> This pool has no liquidity. You need to Create a Pair first.`);
+      console.log(`> This pool has not been created yet. Use "create_pair" first.`);
+      return;
+    }
+
+    if (r0 === 0n && r1 === 0n) {
+      console.log(`> POOL_EMPTY`);
+      console.log(`> Pool: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+      console.log(`> Pool ID: ${poolId}`);
+      console.log(`> Pool is initialized but has no liquidity yet.`);
+      console.log(`> Use "lp_add <pool> <currency> <amount> <otherAmount>" to add initial liquidity.`);
       return;
     }
 
@@ -847,12 +860,13 @@ async function cmd_pool_info(poolStr) {
 
 // ======================= ADD LIQUIDITY =======================
 
-async function cmd_lp_add(poolStr, currencyStr, amountStr, slippageStr = "1") {
+async function cmd_lp_add(poolStr, currencyStr, amountStr, fourthArg) {
   if (!poolStr || !currencyStr || !amountStr) {
     console.log(`> Usage: lp_add <pool> <currency> <amount> [slippage%]`);
     console.log(`> Pool: token pair (e.g. ETH/USDT) — lowest fee tier selected by default`);
     console.log(`> Currency: 0 (currency0) or 1 (currency1)`);
     console.log(`> Provide the amount for one side; the other is auto-calculated from pool ratio.`);
+    console.log(`> For initial liquidity (empty pool): lp_add <pool> <currency> <amount> <otherAmount>`);
     return;
   }
 
@@ -870,14 +884,13 @@ async function cmd_lp_add(poolStr, currencyStr, amountStr, slippageStr = "1") {
 
   const inputToken = inputSide === 0 ? pool.currency0 : pool.currency1;
   const inputAmount = parseUnits(amountStr, inputToken.decimals);
-  const slippage = BigInt(slippageStr);
   const poolId = computePoolId(pool);
 
   const helperABI = loadABI("LikwidHelper");
   const pairPositionABI = loadABI("LikwidPairPosition");
 
   // --- Query pool state ---
-  let r0, r1;
+  let r0, r1, lastUpdated;
   try {
     const stateInfo = await publicClient.readContract({
       address: netConfig.contracts.LikwidHelper,
@@ -887,48 +900,81 @@ async function cmd_lp_add(poolStr, currencyStr, amountStr, slippageStr = "1") {
     });
     r0 = stateInfo.pairReserve0;
     r1 = stateInfo.pairReserve1;
+    // Pool lifecycle: uninitialized (lastUpdated==0) → initialized-empty (lastUpdated>0, reserves==0) → active
+    // Initialization check uses LikwidHelper.getPoolStateInfo().lastUpdated, NOT reserve values.
+    // See docs/likwid-fi-integration-notes.md
+    lastUpdated = stateInfo.lastUpdated;
   } catch (e) {
     return console.log(`> ERROR: Could not query pool state: ${e.shortMessage || e.message}`);
   }
 
   const poolName = `${pool.currency0.symbol}/${pool.currency1.symbol}`;
 
-  if (r0 === 0n && r1 === 0n) {
+  if (lastUpdated === 0n || lastUpdated === 0) {
     console.log(`> POOL_NOT_INITIALIZED`);
     console.log(`> Pool: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
-    console.log(`> This pool has no liquidity. You need to Create a Pair first.`);
+    console.log(`> This pool has not been created yet. Use "create_pair" first.`);
     return;
   }
 
-  // --- Calculate matching amount ---
-  let amount0, amount1;
-  if (inputSide === 0) {
-    amount0 = inputAmount;
-    amount1 = r0 > 0n ? (inputAmount * r1) / r0 : 0n;
+  // --- Determine amounts based on pool state ---
+  let amount0, amount1, amount0Min, amount1Min, isInitialLiquidity = false;
+
+  if (r0 === 0n && r1 === 0n) {
+    // Initial liquidity mode: pool is initialized but empty.
+    // First deposit sets the initial price — both amounts must be provided explicitly.
+    // fourthArg = other side's amount
+    if (!fourthArg) {
+      console.log(`> POOL_EMPTY`);
+      console.log(`> Pool: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+      console.log(`> Pool is initialized but has no liquidity yet.`);
+      console.log(`> First deposit requires both amounts: lp_add <pool> <currency> <amount> <otherAmount>`);
+      return;
+    }
+    isInitialLiquidity = true;
+    const otherToken = inputSide === 0 ? pool.currency1 : pool.currency0;
+    const otherAmount = parseUnits(fourthArg, otherToken.decimals);
+    amount0 = inputSide === 0 ? inputAmount : otherAmount;
+    amount1 = inputSide === 0 ? otherAmount : inputAmount;
+    // No slippage protection for initial deposit — no existing ratio to deviate from
+    amount0Min = 0n;
+    amount1Min = 0n;
   } else {
-    amount1 = inputAmount;
-    amount0 = r1 > 0n ? (inputAmount * r0) / r1 : 0n;
+    // Normal mode: calculate matching amount from pool ratio
+    const slippage = BigInt(fourthArg || "1");
+    if (inputSide === 0) {
+      amount0 = inputAmount;
+      amount1 = (inputAmount * r1) / r0;
+    } else {
+      amount1 = inputAmount;
+      amount0 = (inputAmount * r0) / r1;
+    }
+    amount0Min = (amount0 * (100n - slippage)) / 100n;
+    amount1Min = (amount1 * (100n - slippage)) / 100n;
   }
 
-  const amount0Min = (amount0 * (100n - slippage)) / 100n;
-  const amount1Min = (amount1 * (100n - slippage)) / 100n;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
-
-  const rate = Number(formatUnits(r1, pool.currency1.decimals)) / Number(formatUnits(r0, pool.currency0.decimals));
 
   // --- Check for existing position ---
   const positions = await fetchLiquidityPositions(netConfig.chainId, senderAddress, poolId);
   const existingTokenId = positions.length > 0 ? BigInt(positions[0].tokenId) : null;
 
-  if (existingTokenId) {
+  if (isInitialLiquidity) {
+    const rate = Number(formatUnits(amount1, pool.currency1.decimals)) / Number(formatUnits(amount0, pool.currency0.decimals));
+    console.log(`> LP_INIT: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+    console.log(`> Initial Price: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
+  } else if (existingTokenId) {
+    const rate = Number(formatUnits(r1, pool.currency1.decimals)) / Number(formatUnits(r0, pool.currency0.decimals));
     console.log(`> LP_INCREASE: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%) — tokenId: ${existingTokenId}`);
+    console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
   } else {
+    const rate = Number(formatUnits(r1, pool.currency1.decimals)) / Number(formatUnits(r0, pool.currency0.decimals));
     console.log(`> LP_ADD: ${poolName} (fee: ${(pool.fee / 10000).toFixed(2)}%)`);
+    console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
   }
-  console.log(`> Rate: 1 ${pool.currency0.symbol} = ${rate.toFixed(6)} ${pool.currency1.symbol}`);
   console.log(`> ${pool.currency0.symbol}: ${formatUnits(amount0, pool.currency0.decimals)}`);
   console.log(`> ${pool.currency1.symbol}: ${formatUnits(amount1, pool.currency1.decimals)}`);
-  console.log(`> Slippage: ${slippageStr}%`);
+  if (!isInitialLiquidity) console.log(`> Slippage: ${fourthArg || "1"}%`);
   console.log(`> Sender: ${senderAddress}`);
 
   // --- Build calls ---
@@ -1233,11 +1279,12 @@ async function resolveTokenOrAddress(netConfig, nameOrAddress, publicClient) {
   }
 }
 
-async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
+async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr, amount0Str, amount1Str) {
   if (!token0Name || !token1Name || !feeStr || !marginFeeStr) {
-    console.log(`> Usage: create_pair <token0> <token1> <fee> <marginFee>`);
+    console.log(`> Usage: create_pair <token0> <token1> <fee> <marginFee> [amount0] [amount1]`);
     console.log(`> Tokens can be resolved by name or contract address.`);
     console.log(`> Fee values in basis points (e.g., 3000 = 0.30%).`);
+    console.log(`> Optionally provide amount0 and amount1 to add initial liquidity in the same transaction.`);
     return;
   }
 
@@ -1293,22 +1340,103 @@ async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
   console.log(`> Swap Fee: ${(fee / 10000).toFixed(2)}%  Margin Fee: ${(marginFee / 10000).toFixed(2)}%`);
   console.log(`> Pool ID: ${poolId}`);
 
+  // --- Check pool lifecycle state before initialize ---
+  // Pool lifecycle: uninitialized (lastUpdated==0) → initialized-empty (lastUpdated>0, reserves==0) → active
+  // Initialization check uses LikwidHelper.getPoolStateInfo().lastUpdated, NOT reserve values.
+  // See docs/likwid-fi-integration-notes.md
+  const helperABI = loadABI("LikwidHelper");
+  let poolAlreadyInitialized = false;
+  try {
+    const stateInfo = await publicClient.readContract({
+      address: netConfig.contracts.LikwidHelper,
+      abi: helperABI,
+      functionName: "getPoolStateInfo",
+      args: [poolId],
+    });
+    const lastUpdated = stateInfo.lastUpdated;
+    const r0 = stateInfo.pairReserve0;
+    const r1 = stateInfo.pairReserve1;
+
+    if (lastUpdated > 0n && (r0 > 0n || r1 > 0n)) {
+      console.log(`> POOL_ALREADY_ACTIVE`);
+      console.log(`> Pool already exists with liquidity. Use "lp_add" to add more.`);
+      return;
+    }
+    if (lastUpdated > 0n) {
+      poolAlreadyInitialized = true;
+      console.log(`> Pool already initialized (empty). Skipping initialize step.`);
+    }
+  } catch (_) {
+    // getPoolStateInfo may fail for a truly new pool — proceed with initialize
+  }
+
+  // Build a single calls array so initialize + first addLiquidity land in the
+  // same UserOp batch under the paymaster path — preserves the SKILL.md
+  // invariant that the pool must not be left initialized-but-empty.
   const vaultABI = loadABI("LikwidVault");
-  const vaultAddress = netConfig.contracts.LikwidVault;
+  const combinedCalls = [];
+  if (!poolAlreadyInitialized) {
+    combinedCalls.push({
+      to: netConfig.contracts.LikwidVault,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: vaultABI,
+        functionName: "initialize",
+        args: [poolKey],
+      }),
+    });
+  }
 
-  const calls = [{
-    to: vaultAddress,
-    value: 0n,
-    data: encodeFunctionData({
-      abi: vaultABI,
-      functionName: "initialize",
-      args: [poolKey],
-    }),
-  }];
+  // --- Optional: append initial liquidity calls to the same batch ---
+  // Pool lifecycle: after initialize, the pool is in "initialized-empty" state (lastUpdated>0, reserves==0).
+  // First liquidity deposit sets the initial price ratio. Both amounts must be provided explicitly.
+  let seeded = false;
+  if (amount0Str && amount1Str) {
+    const amount0 = parseUnits(amount0Str, currency0.decimals);
+    const amount1 = parseUnits(amount1Str, currency1.decimals);
+    const pairKeyDisplay = `${currency0.symbol}/${currency1.symbol}`;
+    const rate = Number(formatUnits(amount1, currency1.decimals)) / Number(formatUnits(amount0, currency0.decimals));
+    console.log(`> LP_INIT: ${pairKeyDisplay} (fee: ${(fee / 10000).toFixed(2)}%)`);
+    console.log(`> Initial Price: 1 ${currency0.symbol} = ${rate.toFixed(6)} ${currency1.symbol}`);
+    console.log(`> ${currency0.symbol}: ${formatUnits(amount0, currency0.decimals)}`);
+    console.log(`> ${currency1.symbol}: ${formatUnits(amount1, currency1.decimals)}`);
 
-  console.log(`> Initializing pool on LikwidVault...`);
-  const ok = await executeCalls(config, netConfig, eoaAccount, publicClient, calls);
-  if (!ok) return;
+    const pairPositionABI = loadABI("LikwidPairPosition");
+    const pairPositionAddress = netConfig.contracts.LikwidPairPosition;
+    const senderAddress = eoaAccount.address;
+
+    if (!isNative(currency0.address) && amount0 > 0n) {
+      combinedCalls.push(...await buildApprovalCalls(publicClient, senderAddress, currency0.address, currency0.symbol, pairPositionAddress, amount0));
+    }
+    if (!isNative(currency1.address) && amount1 > 0n) {
+      combinedCalls.push(...await buildApprovalCalls(publicClient, senderAddress, currency1.address, currency1.symbol, pairPositionAddress, amount1));
+    }
+
+    const nativeValue = (isNative(currency0.address) ? amount0 : 0n) + (isNative(currency1.address) ? amount1 : 0n);
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
+
+    combinedCalls.push({
+      to: pairPositionAddress,
+      value: nativeValue,
+      data: encodeFunctionData({
+        abi: pairPositionABI,
+        functionName: "addLiquidity",
+        args: [poolKey, senderAddress, amount0, amount1, 0n, 0n, deadline],
+      }),
+    });
+    seeded = true;
+  }
+
+  if (combinedCalls.length > 0) {
+    console.log(seeded ? `> Initializing pool + seeding liquidity...` : `> Initializing pool on LikwidVault...`);
+    const ok = await executeCalls(config, netConfig, eoaAccount, publicClient, combinedCalls);
+    if (!ok) {
+      if (seeded && !poolAlreadyInitialized) {
+        console.log(`> WARN: batch failed. If initialize landed, rerun create_pair with the same amounts — the initialized-empty pool will be detected and only the seed will be retried.`);
+      }
+      return;
+    }
+  }
 
   // --- Auto-add new tokens and pool to user overrides ---
   const newTokens = [];
@@ -1346,7 +1474,11 @@ async function cmd_create_pair(token0Name, token1Name, feeStr, marginFeeStr) {
     saveUserOverrides(config.network, newTokens, newPool, pairKey);
   }
 
-  console.log(`> Use "lp_add ${pairKey}" to add initial liquidity to this pool.`);
+  if (seeded) {
+    console.log(`> Initial liquidity deposited atomically with initialize.`);
+  } else {
+    console.log(`> Use "lp_add ${pairKey}" to add liquidity, or rerun with amounts: "create_pair ${token0Name} ${token1Name} ${feeStr} ${marginFeeStr} <amount0> <amount1>"`);
+  }
 }
 
 // ======================= MARGIN =======================
@@ -2478,7 +2610,7 @@ Arguments:
           await cmd_swap(args[1], args[2], args[3], args[4]);
           break;
         case "lp_add":
-          await cmd_lp_add(args[1], args[2], args[3], args[4]);
+          await cmd_lp_add(args[1], args[2], args[3], args[4], args[5]);
           break;
         case "lp_positions":
           await cmd_lp_positions(args[1]);
@@ -2487,7 +2619,7 @@ Arguments:
           await cmd_lp_remove(args[1], args[2]);
           break;
         case "create_pair":
-          await cmd_create_pair(args[1], args[2], args[3], args[4]);
+          await cmd_create_pair(args[1], args[2], args[3], args[4], args[5], args[6]);
           break;
         case "margin_quote":
           await cmd_margin_quote(args[1], args[2], args[3], args[4]);

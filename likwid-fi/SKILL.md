@@ -328,11 +328,12 @@ The tokens available for pairing are defined in `pools/<network>.json` under `to
 ### Step 2: Create the Pair
 
 ```bash
-node likwid-fi.js create_pair <token0> <token1> <fee> <marginFee>
+node likwid-fi.js create_pair <token0> <token1> <fee> <marginFee> [amount0] [amount1]
 ```
 
-- `<token0>`, `<token1>`: Token names (e.g., `ETH`, `USDT`). Addresses are auto-sorted to satisfy `currency0 < currency1`.
+- `<token0>`, `<token1>`: Token names (e.g., `ETH`, `USDT`). The on-chain pool still sorts them into `currency0 < currency1`, but any optional `amount0` / `amount1` values must remain mapped to the user's original CLI argument order: `amount0` is for `<token0>`, `amount1` is for `<token1>`.
 - `<fee>`, `<marginFee>`: Fee values in basis points (e.g., `3000` = 0.30%).
+- `[amount0]`, `[amount1]`: Optional initial liquidity amounts for the two input tokens. Use this only when both sides are provided explicitly.
 
 **Report to human:**
 
@@ -346,11 +347,33 @@ node likwid-fi.js create_pair <token0> <token1> <fee> <marginFee>
 
 **Wait for human confirmation before executing.**
 
+**If initial liquidity amounts are provided:**
+
+> **Create Pair + Initial Liquidity Preview:**
+> Input token order: `<TOKEN0>` / `<TOKEN1>`
+> On-chain order: `<SYMBOL0>` / `<SYMBOL1>`
+> Initial deposit: `<AMOUNT0>` `<TOKEN0>`, `<AMOUNT1>` `<TOKEN1>`
+> Initial Price: `1 <SYMBOL0> = <RATE> <SYMBOL1>`
+> Execution: initialize pool + first `addLiquidity` in one atomic transaction
+>
+> Proceed? (yes/no)
+
+When reviewing or updating this flow, preserve these invariants:
+
+- Never reinterpret user-supplied `amount0` / `amount1` against sorted `currency0` / `currency1`; remap explicitly after sorting.
+- Do not split `initialize` and the first liquidity add into separate transactions when the user requested both in one flow. If seeding fails, the pool must not be left initialized-but-empty.
+
 **On success:**
 
 > **Pair Created!**
 > Pool added to config: `<NAME>` (fee: `<FEE>`%).
 > Use `lp_add <NAME> <currency> <amount>` to add initial liquidity.
+
+**On success with initial liquidity:**
+
+> **Pair Created And Seeded!**
+> Pool added to config: `<NAME>` (fee: `<FEE>`%).
+> Initial liquidity deposited atomically in the same transaction.
 
 **If pool already exists:**
 
